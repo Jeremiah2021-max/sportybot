@@ -70,8 +70,6 @@ self.addEventListener("push", event => {
     title: "Virtual Edge",
     body:  "New prediction available!",
     url:   "/",
-    icon:  "./icon-192.png",
-    badge: "./icon-192.png",
   };
 
   if (event.data) {

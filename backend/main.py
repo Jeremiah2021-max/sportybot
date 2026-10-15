@@ -1074,8 +1074,6 @@ async def _send_push_to_all(payload: dict) -> tuple[int, int]:
                     "title": payload.get("title", "Virtual Edge"),
                     "body":  payload.get("body", ""),
                     "url":   payload.get("url", "/"),
-                    "icon":  "/icon-192.png",
-                    "badge": "/icon-192.png",
                 }),
                 vapid_private_key=vapid["private_key"],
                 vapid_claims={

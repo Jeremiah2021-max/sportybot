@@ -10,35 +10,19 @@
   "orientation": "portrait",
   "lang": "en",
   "categories": ["sports", "finance", "utilities"],
-  "icons": [
-    {
-      "src": "icon-192.png",
-      "sizes": "192x192",
-      "type": "image/png",
-      "purpose": "any maskable"
-    },
-    {
-      "src": "icon-512.png",
-      "sizes": "512x512",
-      "type": "image/png",
-      "purpose": "any maskable"
-    }
-  ],
   "screenshots": [],
   "shortcuts": [
     {
       "name": "Predict",
       "short_name": "Predict",
       "description": "Upload a screenshot and get predictions",
-      "url": "./index.html#predict",
-      "icons": [{ "src": "icon-192.png", "sizes": "192x192" }]
+      "url": "./index.html#predict"
     },
     {
       "name": "Bankroll",
       "short_name": "Bankroll",
       "description": "Check your bankroll and stats",
-      "url": "./index.html#bankroll",
-      "icons": [{ "src": "icon-192.png", "sizes": "192x192" }]
+      "url": "./index.html#bankroll"
     }
   ],
   "prefer_related_applications": false,
