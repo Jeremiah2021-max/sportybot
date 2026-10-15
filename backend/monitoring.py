@@ -246,7 +246,7 @@ def _alerts_and_recommendations(
 
     if total < MIN_SAMPLE:
         alerts.append(
-            f"⚠️  Only {total} resolved predictions — need {MIN_SAMPLE} for reliable stats. "
+            f"Only {total} resolved predictions — need {MIN_SAMPLE} for reliable stats. "
             f"Keep logging results."
         )
         recs.append(
@@ -257,28 +257,28 @@ def _alerts_and_recommendations(
     # Win-rate alert
     if wr < WIN_RATE_ALERT_PCT:
         alerts.append(
-            f"🔴 Overall win-rate {wr}% is below the alert threshold of {WIN_RATE_ALERT_PCT}%. "
+            f"Overall win-rate {wr}% is below the alert threshold of {WIN_RATE_ALERT_PCT}%. "
             f"Review your picks."
         )
 
     # ROI alert
     if roi < ROI_ALERT_PCT:
         alerts.append(
-            f"🔴 ROI is {roi}% — negative returns. Consider reducing stake sizes."
+            f"ROI is {roi}% — negative returns. Consider reducing stake sizes."
         )
         recs.append("Apply a stricter edge filter (raise VALUE_THRESHOLD to 5%) to reduce bet count.")
 
     # Trend
     if trend.get("direction") == "declining":
         alerts.append(
-            f"📉 Recent {trend['window']}-prediction win-rate ({trend['win_rate']}%) "
+            f"Recent {trend['window']}-prediction win-rate ({trend['win_rate']}%) "
             f"is declining vs overall ({trend['overall_rate']}%)."
         )
         recs.append("Check if the virtual engine was recently updated — odds patterns may have shifted.")
 
     if trend.get("direction") == "improving":
         alerts.append(
-            f"📈 Recent {trend['window']}-prediction win-rate ({trend['win_rate']}%) "
+            f"Recent {trend['window']}-prediction win-rate ({trend['win_rate']}%) "
             f"is improving vs overall ({trend['overall_rate']}%). Keep the current settings."
         )
 
@@ -289,7 +289,7 @@ def _alerts_and_recommendations(
         tier_name  = tier.get("tier", "")
         if tier_total >= 20 and "HIGH" in tier_name and tier_wr < 55:
             alerts.append(
-                f"⚠️  HIGH confidence picks win at only {tier_wr}% ({tier_total} predictions). "
+                f"HIGH confidence picks win at only {tier_wr}% ({tier_total} predictions). "
                 f"Confidence scoring may need recalibration."
             )
             recs.append(
@@ -305,7 +305,7 @@ def _alerts_and_recommendations(
         std_wr = by_value[std_key].get("win_rate") or 0
         if vb_wr < std_wr and by_value[vb_key].get("total", 0) >= 20:
             alerts.append(
-                f"⚠️  Value bets ({vb_wr}%) are underperforming standard picks ({std_wr}%). "
+                f"Value bets ({vb_wr}%) are underperforming standard picks ({std_wr}%). "
                 f"Edge detection may need recalibration."
             )
             recs.append(
@@ -314,12 +314,12 @@ def _alerts_and_recommendations(
             )
         elif vb_wr > std_wr + 5:
             recs.append(
-                f"✅ Value bets outperform standard picks by {round(vb_wr - std_wr, 1)}pp. "
+                f"Value bets outperform standard picks by {round(vb_wr - std_wr, 1)}pp. "
                 f"Prioritise value bets in your staking."
             )
 
     if not alerts:
-        alerts.append("✅ All metrics within normal range.")
+        alerts.append("All metrics within normal range.")
     if not recs:
         recs.append("No immediate action needed. Continue accumulating results.")
 

@@ -256,9 +256,9 @@ def build_few_shot_block(feedback: List[dict]) -> str:
     losses = [f for f in feedback if f.get("result") == "loss"][-5:]
     block  = "\nPAST RESULTS (learn from these):\n"
     for fb in wins:
-        block += f"  ✅ {fb['home']} vs {fb['away']} → pick={fb['pick']} odd={fb['odd']} WON\n"
+        block += f"  {fb['home']} vs {fb['away']} → pick={fb['pick']} odd={fb['odd']} WON\n"
     for fb in losses:
-        block += f"  ❌ {fb['home']} vs {fb['away']} → pick={fb['pick']} odd={fb['odd']} LOST\n"
+        block += f"  {fb['home']} vs {fb['away']} → pick={fb['pick']} odd={fb['odd']} LOST\n"
     return block
 
 
@@ -1040,7 +1040,7 @@ async def push_notify_endpoint(
 ):
     """Manually trigger a push to all subscribers (admin use)."""
     sent, failed = await _send_push_to_all({
-        "title": "🔥 Virtual Edge — New Analysis Ready",
+        "title": "Virtual Edge — New Analysis Ready",
         "body":  "Open the app to see the latest predictions.",
         "url":   "/",
     })
@@ -1097,7 +1097,7 @@ async def _notify_value_bets(predictions: list, session_id: str):
         return
     best = value_bets[0]
     await _send_push_to_all({
-        "title": f"🔥 Value Bet: {best['home']} vs {best['away']}",
+        "title": f"Value Bet: {best['home']} vs {best['away']}",
         "body":  (f"{best['prediction']} @ {best['odd']} — "
                   f"{best['confidence']} confidence, +{best['edge_pct']:.1f}% edge"),
         "url":   "/",

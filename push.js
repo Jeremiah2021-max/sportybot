@@ -172,12 +172,12 @@ const VEPush = (() => {
       case "prediction_ready":
         // Let app.js render the new predictions
         _dispatch("prediction_ready", msg);
-        _showInAppBanner(`✅ Analysis complete — ${msg.predictions?.length || 0} matches`);
+        _showInAppBanner(`Analysis complete — ${msg.predictions?.length || 0} matches`);
         break;
 
       case "value_alert":
         _dispatch("value_alert", msg);
-        _showInAppBanner(`🔥 ${msg.title}: ${msg.body}`, "value");
+        _showInAppBanner(`${msg.title}: ${msg.body}`, "value");
         break;
 
       case "analysis_progress":
@@ -229,7 +229,7 @@ const VEPush = (() => {
     banner.id        = "ve-push-prompt";
     banner.className = "push-prompt";
     banner.innerHTML = `
-      <span>🔔 Get notified when value bets are found</span>
+      <span>Get notified when value bets are found</span>
       <button id="ve-push-allow" class="push-allow-btn">Allow</button>
       <button id="ve-push-deny"  class="push-deny-btn">Not now</button>
     `;
@@ -239,7 +239,7 @@ const VEPush = (() => {
       banner.remove();
       const result = await requestPermission();
       if (result === "granted") {
-        _showInAppBanner("✅ Notifications enabled!", "info");
+        _showInAppBanner("Notifications enabled!", "info");
       }
     };
     document.getElementById("ve-push-deny").onclick = () => banner.remove();

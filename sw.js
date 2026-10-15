@@ -67,7 +67,7 @@ self.addEventListener("fetch", event => {
 // ──────────────────────────────────────────────────────────────────
 self.addEventListener("push", event => {
   let data = {
-    title: "🔥 Virtual Edge",
+    title: "Virtual Edge",
     body:  "New prediction available!",
     url:   "/",
     icon:  "./icon-192.png",

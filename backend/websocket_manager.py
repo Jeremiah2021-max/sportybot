@@ -55,7 +55,7 @@ def msg_value_alert(home: str, away: str, pick: str,
         "confidence": confidence,
         "edge_pct":   edge_pct,
         "market":     market,
-        "title":      f"🔥 Value Bet: {home} vs {away}",
+        "title":      f"Value Bet: {home} vs {away}",
         "body":       (f"{pick} @ {odd} — {confidence}% confidence, "
                        f"+{edge_pct:.1f}% edge"),
     }

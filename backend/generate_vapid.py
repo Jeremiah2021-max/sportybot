@@ -49,7 +49,7 @@ else:
     }
     OUTPUT.write_text(json.dumps(keys, indent=2))
 
-    print("✅ VAPID keys generated!")
+    print("VAPID keys generated!")
     print(f"  Public key:  {public_key[:40]}...")
     print(f"  Keys file:   {OUTPUT}")
     print()

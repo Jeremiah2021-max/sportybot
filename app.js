@@ -374,8 +374,8 @@ function renderAIPredictions(prediction) {
   const notice   = document.createElement("div");
   notice.className = `rec-notice ${hasValue ? "value-notice" : "info-notice"}`;
   notice.innerHTML = hasValue
-    ? `⚡ <strong>Value bets detected</strong> — AI + Poisson found picks where odds exceed fair probability. Ranked by edge.`
-    : `🤖 <strong>AI + Poisson analysis complete</strong> — No strong value found. Picks shown by highest confidence. Bet small.`;
+    ? `<strong>Value bets detected</strong> — AI + Poisson found picks where odds exceed fair probability. Ranked by edge.`
+    : `<strong>AI + Poisson analysis complete</strong> — No strong value found. Picks shown by highest confidence. Bet small.`;
   container.appendChild(notice);
 
   // ── Per-match prediction cards ──────────────────────────────────
@@ -392,7 +392,7 @@ function renderAIPredictions(prediction) {
 
     const stakeHtml = bankroll > 0 && kellyStakeAmt > 0.01
       ? `<div class="kelly-stake">
-           💰 Suggested stake: <strong>GHS ${kellyStakeAmt.toFixed(2)}</strong>
+           Suggested stake: <strong>GHS ${kellyStakeAmt.toFixed(2)}</strong>
            <span class="kelly-note">¼ Kelly on GHS ${bankroll.toFixed(2)} bankroll</span>
          </div>`
       : bankroll === 0
@@ -424,7 +424,7 @@ function renderAIPredictions(prediction) {
 
       marketsHtml = `
         <div class="markets-block">
-          <div class="markets-title">📊 Poisson Markets</div>
+          <div class="markets-title">Poisson Markets</div>
 
           <div class="market-pills">
             <div class="market-pill ${ou25HasVal ? "pill-value" : ""}">
@@ -506,7 +506,7 @@ function renderAIPredictions(prediction) {
       ${marketsHtml}
 
       <div class="safe-pick-row">
-        🛡️ Safe: <strong>${escapeHtml(sp.pick)}</strong> — ${escapeHtml(sp.label)}
+        Safe: <strong>${escapeHtml(sp.pick)}</strong> — ${escapeHtml(sp.label)}
         <span class="safe-odd">@ ~${sp.odd}</span>
         <span class="safe-prob">(${sp.confidence}% conf)</span>
       </div>
@@ -520,8 +520,8 @@ function renderAIPredictions(prediction) {
            data-odd="${escapeHtml(bp.odd)}"
            data-fixture-id="${p.fixture_id || ""}">
         <span class="feedback-label">Log result:</span>
-        <button class="fb-btn win"  onclick="submitFeedback(this,'win')">✅ Won</button>
-        <button class="fb-btn loss" onclick="submitFeedback(this,'loss')">❌ Lost</button>
+        <button class="fb-btn win"  onclick="submitFeedback(this,'win')">Won</button>
+        <button class="fb-btn loss" onclick="submitFeedback(this,'loss')">Lost</button>
       </div>
     `;
     container.appendChild(card);
@@ -555,7 +555,7 @@ function renderAIPredictions(prediction) {
   // ── RNG disclaimer ───────────────────────────────────────────────
   const disc     = document.createElement("div");
   disc.className = "rec-disclaimer";
-  disc.innerHTML = `⚠️ Instant Virtuals are RNG-based. AI + Poisson analysis is odds-value based only — not real match prediction. Gamble responsibly. 18+`;
+  disc.innerHTML = `Instant Virtuals are RNG-based. AI + Poisson analysis is odds-value based only — not real match prediction. Gamble responsibly. 18+`;
   container.appendChild(disc);
 
   document.getElementById("recommendations").classList.remove("hidden");
@@ -575,7 +575,7 @@ async function submitFeedback(btn, result) {
   };
 
   // Optimistic UI update
-  row.innerHTML = `<span class="feedback-saved">${result === "win" ? "✅ Logged as Won" : "❌ Logged as Lost"}</span>`;
+  row.innerHTML = `<span class="feedback-saved">${result === "win" ? "Logged as Won" : "Logged as Lost"}</span>`;
 
   // Log to bankroll history too
   state.bets.unshift({
@@ -658,7 +658,7 @@ function setupRealtimeFeed() {
     _addFeedEntry({
       type:  "value",
       time:  new Date().toLocaleTimeString(),
-      label: `🔥 ${d.home} vs ${d.away}`,
+      label: `${d.home} vs ${d.away}`,
       sub:   `${d.pick} @ ${d.odd} — +${parseFloat(d.edge_pct || 0).toFixed(1)}% edge`,
       value: true,
     });
@@ -697,7 +697,7 @@ function setupRealtimeFeed() {
       _addFeedEntry({
         type:  "info",
         time:  new Date().toLocaleTimeString(),
-        label: `📊 Accuracy updated — ${msg.accuracy?.win_rate ?? 0}% win rate`,
+        label: `Accuracy updated — ${msg.accuracy?.win_rate ?? 0}% win rate`,
         sub:   `${msg.accuracy?.wins ?? 0}W / ${msg.accuracy?.losses ?? 0}L`,
         value: false,
       });
@@ -722,10 +722,10 @@ function setupRealtimeFeed() {
     // Show current permission state
     const perm = "Notification" in window ? Notification.permission : "unsupported";
     if (perm === "granted") {
-      enableBtn.textContent = "✅ Notifications enabled";
+      enableBtn.textContent = "Notifications enabled";
       enableBtn.disabled    = true;
     } else if (perm === "denied") {
-      enableBtn.textContent = "🚫 Notifications blocked — allow in browser settings";
+      enableBtn.textContent = "Notifications blocked — allow in browser settings";
       enableBtn.disabled    = true;
     }
 
@@ -735,15 +735,15 @@ function setupRealtimeFeed() {
       enableBtn.textContent = "Requesting permission…";
       const result = await VEPush.requestPermission();
       if (result === "granted") {
-        enableBtn.textContent = "✅ Notifications enabled";
+        enableBtn.textContent = "Notifications enabled";
         if (pushStatus) pushStatus.textContent = "You'll get alerts when value bets are found.";
       } else if (result === "denied") {
-        enableBtn.textContent = "🚫 Permission denied";
+        enableBtn.textContent = "Permission denied";
         enableBtn.disabled    = false;
         if (pushStatus) pushStatus.textContent = "Allow notifications in your browser settings.";
       } else {
         enableBtn.disabled    = false;
-        enableBtn.textContent = "🔔 Enable Push Notifications";
+        enableBtn.textContent = "Enable Push Notifications";
       }
     });
   }
@@ -1103,10 +1103,10 @@ function renderRecommendations(ranked) {
   const notice = document.createElement("div");
   notice.className = "rec-notice";
   if (hasValueBets) {
-    notice.innerHTML = `⚡ <strong>Value bets detected</strong> — odds appear generous vs fair probability. Ranked by edge size.`;
+    notice.innerHTML = `<strong>Value bets detected</strong> — odds appear generous vs fair probability. Ranked by edge size.`;
     notice.classList.add("value-notice");
   } else {
-    notice.innerHTML = `ℹ️ No clear value bets found. Showing <strong>best odds probability</strong> only. These are RNG virtuals — bet small.`;
+    notice.innerHTML = `No clear value bets found. Showing <strong>best odds probability</strong> only. These are RNG virtuals — bet small.`;
     notice.classList.add("info-notice");
   }
   container.appendChild(notice);
@@ -1125,7 +1125,7 @@ function renderRecommendations(ranked) {
     if (bankroll > 0 && m.suggestedStake > 0.01) {
       stakeLine = `
         <div class="kelly-stake">
-          💰 Suggested stake: <strong>GHS ${m.suggestedStake.toFixed(2)}</strong>
+          Suggested stake: <strong>GHS ${m.suggestedStake.toFixed(2)}</strong>
           <span class="kelly-note">(¼ Kelly of GHS ${bankroll.toFixed(2)} bankroll)</span>
         </div>`;
     } else if (bankroll === 0) {
@@ -1193,7 +1193,7 @@ function renderRecommendations(ranked) {
   // --- RNG disclaimer ---
   const disclaimer = document.createElement("div");
   disclaimer.className = "rec-disclaimer";
-  disclaimer.innerHTML = `⚠️ Instant Virtuals are RNG-based. No system guarantees a win. This tool shows odds value only — not real predictions. Always gamble within your means.`;
+  disclaimer.innerHTML = `Instant Virtuals are RNG-based. No system guarantees a win. This tool shows odds value only — not real predictions. Always gamble within your means.`;
   container.appendChild(disclaimer);
 
   document.getElementById("recommendations").classList.remove("hidden");
@@ -1397,7 +1397,7 @@ function renderAccuracyMeter(acc) {
   // Value bet sub-note
   const vbNote = document.getElementById("valueBetAccuracy");
   if (vbNote && acc.total_value_bets > 0) {
-    vbNote.textContent  = `⚡ Value bets: ${acc.value_win_rate ?? 0}% win rate on ${acc.total_value_bets} picks`;
+    vbNote.textContent  = `Value bets: ${acc.value_win_rate ?? 0}% win rate on ${acc.total_value_bets} picks`;
     vbNote.classList.remove("hidden");
   }
 }
@@ -1406,7 +1406,7 @@ function renderAccuracyMeter(acc) {
 async function loadPendingPredictions() {
   const list = document.getElementById("pendingList");
   if (!list) return;
-  list.innerHTML = `<p class="empty pending-loading">⏳ Loading pending predictions…</p>`;
+  list.innerHTML = `<p class="empty pending-loading">Loading pending predictions…</p>`;
 
   try {
     const res = await fetch(`${window.BACKEND_URL}/api/predictions/pending`);
@@ -1426,7 +1426,7 @@ function renderPendingList(pending) {
   if (!list) return;
 
   if (!pending || pending.length === 0) {
-    list.innerHTML = `<p class="empty">✅ All predictions have results logged.</p>`;
+    list.innerHTML = `<p class="empty">All predictions have results logged.</p>`;
     return;
   }
 
@@ -1452,11 +1452,11 @@ function renderPendingList(pending) {
         <div class="pending-actions">
           <button class="resolve-btn win"
                   onclick="resolvePrediction(${p.prediction_id}, 'win', this)">
-            ✅ Won
+            Won
           </button>
           <button class="resolve-btn loss"
                   onclick="resolvePrediction(${p.prediction_id}, 'loss', this)">
-            ❌ Lost
+            Lost
           </button>
         </div>
       </div>
@@ -1470,7 +1470,7 @@ async function resolvePrediction(predictionId, result, btn) {
   const actions = row?.querySelector(".pending-actions");
   if (actions) {
     actions.innerHTML = `<span class="resolve-saved">
-      ${result === "win" ? "✅ Logged as Won" : "❌ Logged as Lost"}
+      ${result === "win" ? "Logged as Won" : "Logged as Lost"}
     </span>`;
   }
 
@@ -1519,8 +1519,8 @@ async function resolvePrediction(predictionId, result, btn) {
     if (actions) {
       actions.innerHTML = `
         <span class="resolve-error">Failed — try again</span>
-        <button class="resolve-btn win"  onclick="resolvePrediction(${predictionId},'win',this)">✅ Won</button>
-        <button class="resolve-btn loss" onclick="resolvePrediction(${predictionId},'loss',this)">❌ Lost</button>
+        <button class="resolve-btn win"  onclick="resolvePrediction(${predictionId},'win',this)">Won</button>
+        <button class="resolve-btn loss" onclick="resolvePrediction(${predictionId},'loss',this)">Lost</button>
       `;
     }
   }
