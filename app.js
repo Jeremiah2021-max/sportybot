@@ -23,6 +23,7 @@ let currentImage = null;
 document.addEventListener("DOMContentLoaded", () => {
   loadState();
   setupTabs();
+  setupMarketTabs();
   setupUpload();
   setupApiKeyToggle();
   setupBankroll();
@@ -75,6 +76,53 @@ function setupTabs() {
       btn.classList.add("active");
       document.getElementById(btn.dataset.tab).classList.add("active");
     });
+  });
+}
+
+function setupMarketTabs() {
+  document.querySelectorAll("#marketSelectorTabs .market-tab").forEach(btn => {
+    btn.addEventListener("click", () => {
+      document.querySelectorAll("#marketSelectorTabs .market-tab").forEach(t => t.classList.remove("active"));
+      btn.classList.add("active");
+      state.activeMarket = btn.dataset.market;
+      renderMatchesEditor();
+    });
+  });
+
+  document.querySelectorAll("#recsMarketTabs .market-tab").forEach(btn => {
+    btn.addEventListener("click", () => {
+      document.querySelectorAll("#recsMarketTabs .market-tab").forEach(t => t.classList.remove("active"));
+      btn.classList.add("active");
+      applyRecsMarketFilter(btn.dataset.recsMarket);
+    });
+  });
+}
+
+function syncMarketTabsUI(market) {
+  const norm = String(market || "").toUpperCase().includes("O") ? "OU" : (String(market || "").toUpperCase().includes("DC") ? "DC" : "1X2");
+  document.querySelectorAll("#marketSelectorTabs .market-tab").forEach(t => {
+    t.classList.toggle("active", t.dataset.market === norm);
+  });
+}
+
+function applyRecsMarketFilter(mode) {
+  const cards = document.querySelectorAll("#recsContainer .rec-card");
+  cards.forEach(card => {
+    const ouSection = card.querySelector(".ou-match-section");
+    const dcSection = card.querySelector(".dc-match-section");
+    if (mode === "OU") {
+      if (ouSection) ouSection.style.display = "block";
+      if (dcSection) dcSection.style.display = "none";
+    } else if (mode === "DC") {
+      if (ouSection) ouSection.style.display = "none";
+      if (dcSection) dcSection.style.display = "block";
+    } else if (mode === "1X2") {
+      if (ouSection) ouSection.style.display = "none";
+      if (dcSection) dcSection.style.display = "none";
+    } else {
+      if (ouSection) ouSection.style.display = "block";
+      if (dcSection) dcSection.style.display = "block";
+    }
   });
 }
 
@@ -276,8 +324,12 @@ async function runOCR() {
         const data = await res.json();
         if (data.matches && data.matches.length > 0) {
           state.matches = data.matches;
+          if (data.active_market) {
+            state.activeMarket = data.active_market.toUpperCase().includes("O") ? "OU" : data.active_market;
+            syncMarketTabsUI(state.activeMarket);
+          }
           usedBackend   = true;
-          setStatus(`OCR complete — ${data.matches.length} matches found (${data.engine})`, 40);
+          setStatus(`OCR complete — ${data.matches.length} matches found (${data.engine}) [Market: ${data.active_market || '1X2'}]`, 40);
         }
       }
     } catch (backendErr) {
@@ -303,6 +355,10 @@ async function runOCR() {
       await worker.terminate();
       setStatus("Parsing SportyBet layout…", 40);
       state.matches = parseOCRText(text);
+      if (/\b(O\/U|OVER\/UNDER|OVERS|UNDERS)\b/i.test(text)) {
+        state.activeMarket = "OU";
+        syncMarketTabsUI("OU");
+      }
     }
 
     // Ensure editable rows even if OCR found nothing
@@ -545,6 +601,71 @@ function renderAIPredictions(prediction) {
     const dc12_odd = (1 / ((p1 + p2) * 0.92)).toFixed(2);
     const dcX2_odd = (1 / ((pX + p2) * 0.92)).toFixed(2);
 
+    // Dedicated Over/Under Section
+    const ouDetail = markets?.ou_detail || null;
+    let ouHtml = "";
+    if (ouDetail) {
+      const rec = ouDetail.recommended;
+      const l = ouDetail.lines;
+      ouHtml = `
+        <div class="ou-match-section">
+          <div class="ou-header">
+            <span class="ou-title">⚽ Over / Under (O/U) Goals</span>
+            <span class="ou-rec-badge">Best: <strong>${escapeHtml(rec.pick)}</strong> (~${rec.odd})</span>
+          </div>
+          <div class="ou-expl">💡 ${escapeHtml(rec.explanation)} (Probability: ${Math.round(rec.prob * 100)}%, Fair: @${rec.odd})</div>
+          <div class="ou-lines-grid">
+            <div class="ou-line-card ${rec.pick.includes('1.5') ? 'ou-favored' : ''}">
+              <span class="ou-line-name">Over 1.5 (O 1.5)</span>
+              <span class="ou-line-prob">${Math.round(l['1.5'].over_prob * 100)}%</span>
+              <span class="ou-line-desc">2+ goals in match</span>
+            </div>
+            <div class="ou-line-card ${rec.pick.includes('O 2.5') ? 'ou-favored' : ''}">
+              <span class="ou-line-name">Over 2.5 (O 2.5)</span>
+              <span class="ou-line-prob">${Math.round(l['2.5'].over_prob * 100)}%</span>
+              <span class="ou-line-desc">3+ goals in match</span>
+            </div>
+            <div class="ou-line-card ${rec.pick.includes('U 2.5') ? 'ou-favored' : ''}">
+              <span class="ou-line-name">Under 2.5 (U 2.5)</span>
+              <span class="ou-line-prob">${Math.round(l['2.5'].under_prob * 100)}%</span>
+              <span class="ou-line-desc">0, 1, or 2 goals</span>
+            </div>
+          </div>
+        </div>
+      `;
+    } else {
+      const o25 = markets?.over25_prob || 0.52;
+      const u25 = markets?.under25_prob || 0.48;
+      const o15 = Math.min(0.95, o25 * 1.35);
+      const isOver = o25 >= 0.55;
+      ouHtml = `
+        <div class="ou-match-section">
+          <div class="ou-header">
+            <span class="ou-title">⚽ Over / Under (O/U) Goals</span>
+            <span class="ou-rec-badge">Best: <strong>${isOver ? 'O 1.5' : 'U 2.5'}</strong></span>
+          </div>
+          <div class="ou-expl">💡 ${isOver ? 'O 1.5 means the match will record 2 or more goals at the end.' : 'U 2.5 means the match will record 2 or fewer goals at the end.'}</div>
+          <div class="ou-lines-grid">
+            <div class="ou-line-card ${isOver ? 'ou-favored' : ''}">
+              <span class="ou-line-name">Over 1.5 (O 1.5)</span>
+              <span class="ou-line-prob">${Math.round(o15 * 100)}%</span>
+              <span class="ou-line-desc">2+ goals in match</span>
+            </div>
+            <div class="ou-line-card ${o25 >= 0.55 ? 'ou-favored' : ''}">
+              <span class="ou-line-name">Over 2.5 (O 2.5)</span>
+              <span class="ou-line-prob">${Math.round(o25 * 100)}%</span>
+              <span class="ou-line-desc">3+ goals in match</span>
+            </div>
+            <div class="ou-line-card ${!isOver ? 'ou-favored' : ''}">
+              <span class="ou-line-name">Under 2.5 (U 2.5)</span>
+              <span class="ou-line-prob">${Math.round(u25 * 100)}%</span>
+              <span class="ou-line-desc">0, 1, or 2 goals</span>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
     card.innerHTML = `
       ${p.value_bet
         ? `<span class="value-badge">VALUE BET</span>`
@@ -566,6 +687,9 @@ function renderAIPredictions(prediction) {
       </div>
 
       <div class="ai-reasoning">"${escapeHtml(bp.reasoning)}"</div>
+
+      <!-- Over / Under Goals Market for EVERY match -->
+      ${ouHtml}
 
       <!-- Double Chance for EVERY match -->
       <div class="dc-match-section">
@@ -889,7 +1013,7 @@ function renderLiveFeed() {
 const SPORTYBET_TEAMS = {
   // Premier League / England Virtuals
   "ARSENAL": "ARS", "ARS": "ARS",
-  "ASTON VILLA": "AVL", "AST": "AVL", "AVL": "AVL", "VILLA": "AVL",
+  "ASTON VILLA": "AST", "AST": "AST", "AVL": "AST", "VILLA": "AST",
   "BOURNEMOUTH": "BOU", "BOU": "BOU",
   "BRENTFORD": "BRE", "BRE": "BRE",
   "BRIGHTON": "BHA", "BHA": "BHA",
@@ -908,6 +1032,31 @@ const SPORTYBET_TEAMS = {
   "TOTTENHAM": "TOT", "SPURS": "TOT", "TOT": "TOT",
   "WEST HAM": "WHU", "WEST HAM UNITED": "WHU", "WHU": "WHU",
   "WOLVES": "WOL", "WOLVERHAMPTON": "WOL", "WOL": "WOL",
+  // English Championship / Instant Football additions
+  "COVENTRY": "COV", "COVENTRY CITY": "COV", "COV": "COV",
+  "SUNDERLAND": "SUN", "SUN": "SUN",
+  "LEEDS": "LEE", "LEEDS UNITED": "LEE", "LEE": "LEE",
+  "HULL": "HUL", "HULL CITY": "HUL", "HUL": "HUL",
+  "SHEFFIELD UNITED": "SHU", "SHU": "SHU",
+  "SHEFFIELD WEDNESDAY": "SHW", "SHW": "SHW",
+  "BURNLEY": "BUR", "BUR": "BUR",
+  "LUTON": "LUT", "LUTON TOWN": "LUT", "LUT": "LUT",
+  "NORWICH": "NOR", "NORWICH CITY": "NOR", "NOR": "NOR",
+  "WATFORD": "WAT", "WAT": "WAT",
+  "WEST BROM": "WBA", "WBA": "WBA",
+  "STOKE": "STK", "STOKE CITY": "STK", "STK": "STK",
+  "MIDDLESBROUGH": "MID", "MID": "MID",
+  "BLACKBURN": "BLB", "BLB": "BLB",
+  "QPR": "QPR",
+  "MILLWALL": "MIL",
+  "PRESTON": "PNE", "PNE": "PNE",
+  "SWANSEA": "SWA", "SWA": "SWA",
+  "CARDIFF": "CAR", "CAR": "CAR",
+  "BRISTOL CITY": "BRC", "BRC": "BRC",
+  "DERBY": "DER", "DERBY COUNTY": "DER", "DER": "DER",
+  "OXFORD": "OXF", "OXF": "OXF",
+  "PLYMOUTH": "PLY", "PLY": "PLY",
+  "PORTSMOUTH": "POR", "POR": "POR",
 
   // La Liga / Spain
   "REAL MADRID": "RMA", "RMA": "RMA",
@@ -937,6 +1086,12 @@ const SPORTYBET_TEAMS = {
   "LEIPZIG": "RBL", "RB LEIPZIG": "RBL", "RBL": "RBL"
 };
 
+const NON_TEAMS = new Set([
+  "ENG", "SPA", "GER", "ITA", "CHA", "GHS", "INS", "FOO", "TBA", "TAB",
+  "ROU", "NEX", "BET", "SLI", "ALL", "LEA", "GUE", "MIN", "SEC", "HAL",
+  "YES", "NOO", "DRA", "AWY", "HOM"
+]);
+
 function cleanTeam(name) {
   if (!name) return "";
   let raw = String(name).replace(/[^a-zA-Z0-9\s]/g, "").replace(/\s+/g, " ").trim().toUpperCase();
@@ -945,9 +1100,10 @@ function cleanTeam(name) {
     if (SPORTYBET_TEAMS[part]) return SPORTYBET_TEAMS[part];
   }
   const m = raw.match(/\b([A-Z]{3})\b/);
-  if (m && SPORTYBET_TEAMS[m[1]]) return m[1];
+  if (m && !NON_TEAMS.has(m[1])) return m[1];
   const alpha = raw.replace(/[^A-Z]/g, "");
-  return SPORTYBET_TEAMS[alpha] || (alpha.length === 3 ? alpha : "");
+  if (alpha.length === 3 && !NON_TEAMS.has(alpha)) return alpha;
+  return SPORTYBET_TEAMS[alpha] || "";
 }
 
 // Preprocess dark screenshot for Tesseract: inverts dark background and stretches contrast
@@ -1145,6 +1301,21 @@ function renderMatchesEditor() {
       `;
     }
 
+    let l1 = "1 [Home]", lX = "X [Draw]", l2 = "2 [Away]";
+    if (state.activeMarket === "OU") {
+      l1 = "Over (e.g. 1.5)";
+      lX = "Line (Goal Line)";
+      l2 = "Under (e.g. 1.5)";
+    } else if (state.activeMarket === "DC") {
+      l1 = "1X [Home/Draw]";
+      lX = "12 [Home/Away]";
+      l2 = "X2 [Draw/Away]";
+    } else if (state.activeMarket === "GGNG") {
+      l1 = "GG [Both Score]";
+      lX = "—";
+      l2 = "NG [Clean Sheet]";
+    }
+
     const row = document.createElement("div");
     row.className = "match-row";
     row.innerHTML = `
@@ -1166,13 +1337,13 @@ function renderMatchesEditor() {
       </div>
 
       <div class="odds-row">
-        <label>1 [Home]
+        <label>${l1}
           <input type="number" step="0.01" min="1" value="${m.odd1}" data-idx="${idx}" data-field="odd1" placeholder="1.85" />
         </label>
-        <label>X [Draw]
+        <label>${lX}
           <input type="number" step="0.01" min="1" value="${m.oddX}" data-idx="${idx}" data-field="oddX" placeholder="3.40" />
         </label>
-        <label>2 [Away]
+        <label>${l2}
           <input type="number" step="0.01" min="1" value="${m.odd2}" data-idx="${idx}" data-field="odd2" placeholder="4.10" />
         </label>
       </div>

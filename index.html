@@ -169,14 +169,34 @@
           <h2>Extracted Matches</h2>
           <button id="addMatchBtn" class="btn-small">+ Add</button>
         </div>
-        <p class="hint">Correct any mistakes from OCR before ranking.</p>
+        <div class="market-selector-wrap">
+          <span class="market-selector-label">SportyBet Market Mode:</span>
+          <div class="market-tabs" id="marketSelectorTabs">
+            <button type="button" class="market-tab active" data-market="1X2">🎯 1X2 (Winner)</button>
+            <button type="button" class="market-tab" data-market="OU">⚽ Over / Under (O/U)</button>
+            <button type="button" class="market-tab" data-market="DC">🛡️ Double Chance</button>
+            <button type="button" class="market-tab" data-market="GGNG">🥅 GG / NG</button>
+          </div>
+        </div>
+        <p class="hint">Matches identified with 3-letter codes. Verify odds before generating predictions.</p>
         <div id="matchesList"></div>
         <button id="rankBtn" class="btn btn-primary">Rank Best Bets</button>
       </div>
 
       <!-- Recommendations -->
       <div id="recommendations" class="card hidden">
-        <h2>Best Options to Stake</h2>
+        <div class="section-header">
+          <h2>Best Options to Stake</h2>
+        </div>
+        <div class="market-selector-wrap" style="margin-bottom: 14px;">
+          <span class="market-selector-label">Display Mode:</span>
+          <div class="market-tabs" id="recsMarketTabs">
+            <button type="button" class="market-tab active" data-recs-market="ALL">🌟 All Options</button>
+            <button type="button" class="market-tab" data-recs-market="OU">⚽ Over / Under (O/U)</button>
+            <button type="button" class="market-tab" data-recs-market="1X2">🎯 1X2 Pick</button>
+            <button type="button" class="market-tab" data-recs-market="DC">🛡️ Double Chance</button>
+          </div>
+        </div>
         <div id="recsContainer"></div>
       </div>
     </section>

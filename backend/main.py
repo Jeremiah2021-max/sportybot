@@ -145,6 +145,8 @@ class MarketData(BaseModel):
     correct_scores: List[CorrectScore]
     lambda_home:    float
     lambda_away:    float
+    expected_goals: Optional[float] = None
+    ou_detail:      Optional[dict]  = None
 
 
 class PickDetail(BaseModel):
@@ -240,7 +242,7 @@ class PushSubscription(BaseModel):
 SPORTYBET_TEAMS = {
     # Premier League / English Virtuals (3-letter standard codes)
     "ARSENAL": "ARS", "ARS": "ARS",
-    "ASTON VILLA": "AVL", "AST": "AVL", "AVL": "AVL", "VILLA": "AVL",
+    "ASTON VILLA": "AST", "AST": "AST", "AVL": "AST", "VILLA": "AST",
     "BOURNEMOUTH": "BOU", "BOU": "BOU",
     "BRENTFORD": "BRE", "BRE": "BRE",
     "BRIGHTON": "BHA", "BHA": "BHA",
@@ -731,9 +733,11 @@ Return ONLY a valid JSON object (no markdown):
     raise RuntimeError("All Groq prediction models failed")
 
 
-def _poisson_market_data(o1: float, oX: float, o2: float) -> Optional[MarketData]:
+def _poisson_market_data(o1: float, oX: float, o2: float, home: str = "", away: str = "") -> Optional[MarketData]:
     try:
+        from analytics import _build_ou_market
         a = analyse_match(o1, oX, o2)
+        ou_det = _build_ou_market(a, home, away)
         return MarketData(
             over25_prob   = a["over25_prob"],
             under25_prob  = a["under25_prob"],
@@ -744,6 +748,8 @@ def _poisson_market_data(o1: float, oX: float, o2: float) -> Optional[MarketData
             correct_scores=[CorrectScore(**cs) for cs in a["correct_scores"]],
             lambda_home   = a["lambda_home"],
             lambda_away   = a["lambda_away"],
+            expected_goals= ou_det["recommended"]["expected_goals"],
+            ou_detail     = ou_det,
         )
     except Exception as e:
         print(f"Poisson market data failed: {e}")
@@ -988,6 +994,7 @@ async def predict_endpoint(
     matches:       List[MatchInput],
     session_id:    Optional[str]  = None,
     token_payload: Optional[dict] = Depends(get_optional_user),
+    request:       Request = None,
 ):
     """
     Two-layer pipeline:
@@ -1001,10 +1008,11 @@ async def predict_endpoint(
     if len(matches) > 12:
         raise HTTPException(400, "Maximum 12 matches per request")
 
-    groq_key = os.getenv("GROQ_API_KEY")
-    gemini_key = os.getenv("GOOGLE_AI_STUDIO_KEY") or os.getenv("GEMINI_API_KEY")
-    if not groq_key and not gemini_key:
-        raise HTTPException(503, "No AI key configured — set GROQ_API_KEY or GOOGLE_AI_STUDIO_KEY")
+    gemini_key = None
+    if request:
+        gemini_key = request.headers.get("x-gemini-key")
+    if not gemini_key:
+        gemini_key = os.getenv("GOOGLE_AI_STUDIO_KEY") or os.getenv("GEMINI_API_KEY")
 
     # Bankroll from auth user if logged in
     bankroll = 0.0
@@ -1019,7 +1027,7 @@ async def predict_endpoint(
     ai_result    = None
     feedback     = load_recent_feedback(20)
     try:
-        ai_result = await _run_ai_prediction(match_dicts, feedback)
+        ai_result = await _run_ai_prediction(match_dicts, feedback, gemini_key)
     except Exception as e:
         print(f"AI prediction failed, using pure Poisson: {e}")
 
@@ -1032,13 +1040,13 @@ async def predict_endpoint(
 
         # Find matching input odds
         odds = next((m for m in match_dicts
-                     if clean_team(m["home"]) == home), None)
+                     if m.get("home", "").strip().upper() == home or clean_team(m["home"]) == home), None)
         o1 = safe_float(odds["odd1"]) if odds else 0.0
         oX = safe_float(odds["oddX"]) if odds else 0.0
         o2 = safe_float(odds["odd2"]) if odds else 0.0
 
         # Poisson market data
-        poisson_data = _poisson_market_data(o1, oX, o2) if o1 else None
+        poisson_data = _poisson_market_data(o1, oX, o2, home, away) if o1 else None
 
         # Overlay AI reasoning if available
         if ai_result:
