@@ -1,0 +1,30 @@
+# Web framework
+fastapi==0.115.0
+uvicorn[standard]==0.30.6
+python-multipart==0.0.9
+
+# AI / OCR engines
+openai>=1.40.0
+google-cloud-vision>=3.7.0
+google-generativeai>=0.7.0
+Pillow>=10.0.0
+
+# Database – ORM + SQLite (default) or PostgreSQL
+sqlalchemy>=2.0.0
+psycopg2-binary>=2.9.9   # PostgreSQL driver (binary = no compiler needed)
+
+# Auth – JWT + password hashing
+passlib[bcrypt]==1.7.4
+python-jose[cryptography]==3.3.0
+
+# Web Push notifications
+pywebpush>=2.0.0
+
+# Background scheduler (results checker)
+apscheduler>=3.10.0
+
+# Environment config
+python-dotenv>=1.0.0
+
+# Data validation
+pydantic>=2.0

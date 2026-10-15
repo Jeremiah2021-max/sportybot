@@ -1,0 +1,34 @@
+# ── Secrets — NEVER commit these ─────────────────────────────────
+backend/.env
+backend/vapid_keys.json
+backend/feedback_store.jsonl
+backend/push_subscriptions.jsonl
+
+# ── Database files ────────────────────────────────────────────────
+backend/virtualedge.db
+backend/virtualedge.db-wal
+backend/virtualedge.db-shm
+
+# ── Python ────────────────────────────────────────────────────────
+backend/venv/
+backend/__pycache__/
+backend/*.py[cod]
+backend/*.pyo
+backend/.pytest_cache/
+**/__pycache__/
+**/*.pyc
+
+# ── Node (if ever added) ──────────────────────────────────────────
+node_modules/
+npm-debug.log*
+
+# ── OS files ──────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ── IDE ───────────────────────────────────────────────────────────
+.vscode/settings.json
+.idea/
+*.swp
+*.swo

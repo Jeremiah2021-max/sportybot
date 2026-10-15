@@ -1,0 +1,340 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <meta name="theme-color" content="#1a0b2e" />
+  <title>Sporty Virtual Predictor | Ghana</title>
+  <link rel="stylesheet" href="style.css" />
+  <link rel="manifest" href="manifest.json" />
+  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+  <style>
+    /* ── Toast notifications ── */
+    .ve-toast {
+      position: fixed;
+      bottom: 80px;
+      left: 50%;
+      transform: translateX(-50%) translateY(20px);
+      background: #1a0b2e;
+      border: 1px solid #3b0764;
+      color: #f3e8ff;
+      padding: 12px 20px;
+      border-radius: 12px;
+      font-size: 0.85rem;
+      font-weight: 600;
+      max-width: 88vw;
+      text-align: center;
+      z-index: 9999;
+      opacity: 0;
+      transition: opacity 0.3s, transform 0.3s;
+      box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+      pointer-events: none;
+    }
+    .ve-toast.ve-toast-show {
+      opacity: 1;
+      transform: translateX(-50%) translateY(0);
+    }
+    .ve-toast.ve-toast-value {
+      border-color: #fbbf24;
+      background: rgba(251,191,36,0.12);
+      color: #fbbf24;
+    }
+
+    /* ── Push permission prompt ── */
+    #ve-push-prompt {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      z-index: 9998;
+      background: linear-gradient(135deg, #1a0b2e, #24103d);
+      border-bottom: 1px solid #3b0764;
+      padding: 10px 16px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+      font-size: 0.82rem;
+      color: #f3e8ff;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.4);
+    }
+    #ve-push-prompt span { flex: 1; min-width: 180px; }
+    .push-allow-btn {
+      background: #7c3aed;
+      color: white;
+      border: none;
+      padding: 7px 16px;
+      border-radius: 8px;
+      font-weight: 700;
+      cursor: pointer;
+      font-size: 0.82rem;
+    }
+    .push-allow-btn:hover { background: #6d28d9; }
+    .push-deny-btn {
+      background: transparent;
+      color: #c4b5fd;
+      border: 1px solid #3b0764;
+      padding: 7px 12px;
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 0.82rem;
+    }
+
+    /* ── WS status indicator ── */
+    #ws-status {
+      position: fixed;
+      bottom: 12px;
+      right: 14px;
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: #ef4444;
+      z-index: 9000;
+      transition: background 0.3s;
+      box-shadow: 0 0 6px rgba(0,0,0,0.4);
+    }
+    #ws-status.connected { background: #22c55e; box-shadow: 0 0 8px rgba(34,197,94,0.5); }
+    #ws-status.connecting { background: #fbbf24; }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <!-- Header -->
+    <header class="header">
+      <div class="logo">
+        <span class="logo-icon">⚽</span>
+        <div>
+          <h1>Virtual Edge</h1>
+          <p class="subtitle">SportyBet Instant Virtuals • Ghana</p>
+        </div>
+      </div>
+      <div class="bankroll-pill" id="bankrollPill">
+        <span class="label">Bankroll</span>
+        <span class="amount" id="headerBankroll">GHS 0.00</span>
+      </div>
+    </header>
+
+    <!-- Tabs -->
+    <nav class="tabs">
+      <button class="tab active" data-tab="predict">Predict</button>
+      <button class="tab" data-tab="bankroll">Bankroll</button>
+      <button class="tab" data-tab="history">History</button>
+      <button class="tab" data-tab="live">Live <span class="live-dot"></span></button>
+    </nav>
+
+    <!-- PREDICT TAB -->
+    <section id="predict" class="tab-content active">
+      <div class="card upload-card">
+        <h2>Upload Screenshot</h2>
+        <p class="hint">Take a clear screenshot of the Instant Virtuals matches and upload it here.</p>
+        
+        <div class="upload-zone" id="uploadZone">
+          <input type="file" id="fileInput" accept="image/*" capture="environment" hidden />
+          <div class="upload-placeholder" id="uploadPlaceholder">
+            <div class="upload-icon">📷</div>
+            <p>Tap to upload screenshot</p>
+            <span class="small">or drag & drop</span>
+          </div>
+          <img id="previewImage" class="preview-image hidden" alt="Screenshot preview" />
+        </div>
+
+        <button id="analyzeBtn" class="btn btn-primary" disabled>
+          <span class="btn-text">Analyze Matches</span>
+          <span class="spinner hidden"></span>
+        </button>
+      </div>
+
+      <!-- OCR Status -->
+      <div id="ocrStatus" class="card status-card hidden">
+        <div class="status-row">
+          <span id="statusText">Reading screenshot...</span>
+          <span id="statusPercent">0%</span>
+        </div>
+        <div class="progress-bar">
+          <div class="progress-fill" id="progressFill"></div>
+        </div>
+      </div>
+
+      <!-- Extracted Matches (editable) -->
+      <div id="matchesSection" class="card hidden">
+        <div class="section-header">
+          <h2>Extracted Matches</h2>
+          <button id="addMatchBtn" class="btn-small">+ Add</button>
+        </div>
+        <p class="hint">Correct any mistakes from OCR before ranking.</p>
+        <div id="matchesList"></div>
+        <button id="rankBtn" class="btn btn-primary">Rank Best Bets</button>
+      </div>
+
+      <!-- Recommendations -->
+      <div id="recommendations" class="card hidden">
+        <h2>Best Options to Stake</h2>
+        <div id="recsContainer"></div>
+      </div>
+    </section>
+
+    <!-- BANKROLL TAB -->
+    <section id="bankroll" class="tab-content">
+      <div class="card">
+        <h2>Your Bankroll</h2>
+        <div class="bankroll-display">
+          <span class="currency">GHS</span>
+          <span class="big-amount" id="currentBankroll">0.00</span>
+        </div>
+
+        <div class="form-row">
+          <label>Starting / Current Bankroll</label>
+          <input type="number" id="setBankrollInput" placeholder="e.g. 200" step="0.01" min="0" />
+          <button id="setBankrollBtn" class="btn btn-secondary">Set Bankroll</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>Log a Bet Result</h2>
+        <div class="form-group">
+          <label>Match / Selection</label>
+          <input type="text" id="betMatch" placeholder="e.g. HOME - Man Utd vs Liverpool" />
+        </div>
+        <div class="form-row two-col">
+          <div class="form-group">
+            <label>Stake (GHS)</label>
+            <input type="number" id="betStake" placeholder="20" step="0.01" min="0" />
+          </div>
+          <div class="form-group">
+            <label>Odds</label>
+            <input type="number" id="betOdds" placeholder="1.85" step="0.01" min="1" />
+          </div>
+        </div>
+        <div class="form-group">
+          <label>Result</label>
+          <div class="result-btns">
+            <button class="result-btn win" data-result="win">Won</button>
+            <button class="result-btn loss" data-result="loss">Lost</button>
+          </div>
+        </div>
+        <button id="logBetBtn" class="btn btn-primary">Log Result</button>
+      </div>
+
+      <div class="card stats-card">
+        <h2>Performance</h2>
+        <div class="stats-grid">
+          <div class="stat">
+            <span class="stat-value" id="winRate">0%</span>
+            <span class="stat-label">Win Rate</span>
+          </div>
+          <div class="stat">
+            <span class="stat-value" id="totalBets">0</span>
+            <span class="stat-label">Total Bets</span>
+          </div>
+          <div class="stat">
+            <span class="stat-value" id="profitLoss">GHS 0</span>
+            <span class="stat-label">Profit / Loss</span>
+          </div>
+          <div class="stat">
+            <span class="stat-value" id="avgOdds">-</span>
+            <span class="stat-label">Avg Odds</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- HISTORY TAB -->
+    <section id="history" class="tab-content">
+
+      <!-- ── Accuracy Meter ── -->
+      <div class="card accuracy-card" id="accuracyCard">
+        <h2>Prediction Accuracy</h2>
+        <div class="accuracy-meter-row">
+          <div class="accuracy-ring-wrap">
+            <svg class="accuracy-ring" viewBox="0 0 44 44">
+              <circle class="ring-bg"    cx="22" cy="22" r="18" />
+              <circle class="ring-fill"  cx="22" cy="22" r="18"
+                      id="ringFill"
+                      stroke-dasharray="0 113.1" />
+            </svg>
+            <span class="ring-label" id="accuracyPct">—</span>
+          </div>
+          <div class="accuracy-stats">
+            <div class="acc-stat">
+              <span class="acc-val" id="accTotal">0</span>
+              <span class="acc-lbl">Resolved</span>
+            </div>
+            <div class="acc-stat">
+              <span class="acc-val green" id="accWins">0</span>
+              <span class="acc-lbl">Wins</span>
+            </div>
+            <div class="acc-stat">
+              <span class="acc-val red"   id="accLosses">0</span>
+              <span class="acc-lbl">Losses</span>
+            </div>
+            <div class="acc-stat">
+              <span class="acc-val gold"  id="accProfit">GHS 0</span>
+              <span class="acc-lbl">Profit</span>
+            </div>
+          </div>
+        </div>
+        <div class="accuracy-bar-wrap">
+          <div class="accuracy-bar" id="accuracyBar"></div>
+        </div>
+        <div id="valueBetAccuracy" class="value-acc-note hidden"></div>
+      </div>
+
+      <!-- ── Results Checker ── -->
+      <div class="card" id="resultsCheckerCard">
+        <div class="section-header">
+          <h2>Results Checker</h2>
+          <button id="refreshPendingBtn" class="btn-small">↻ Refresh</button>
+        </div>
+        <p class="hint">Log the actual outcome of each prediction to keep your accuracy stats up to date.</p>
+        <div id="pendingList" class="pending-list">
+          <p class="empty">Loading pending predictions…</p>
+        </div>
+      </div>
+
+      <!-- ── Bet History ── -->
+      <div class="card">
+        <div class="section-header">
+          <h2>Bet History</h2>
+          <button id="clearHistoryBtn" class="btn-small danger">Clear</button>
+        </div>
+        <div id="historyList" class="history-list">
+          <p class="empty">No bets logged yet.</p>
+        </div>
+      </div>
+
+    </section>
+
+    <!-- LIVE FEED TAB -->
+    <section id="live" class="tab-content">
+      <div class="card">
+        <div class="section-header">
+          <h2>Live Feed</h2>
+          <span id="ws-badge" class="ws-badge ws-badge-off">Connecting…</span>
+        </div>
+        <p class="hint">Real-time events from the analysis engine appear here instantly.</p>
+        <div id="liveFeedList" class="live-feed-list">
+          <p class="empty">Waiting for live events…</p>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>Notifications</h2>
+        <p class="hint">Get a browser alert whenever a value bet is found, even if this tab is in the background.</p>
+        <button id="enablePushBtn" class="btn btn-secondary" style="margin-top:4px">
+          🔔 Enable Push Notifications
+        </button>
+        <div id="pushStatus" class="push-status-text"></div>
+      </div>
+    </section>
+
+    <!-- Footer note -->
+    <footer class="footer">
+      <p>Instant Virtuals are RNG-based. This tool ranks by odds probability only. Gamble responsibly. 18+</p>
+    </footer>
+  </div>
+
+  <div id="ws-status" title="Real-time connection"></div>
+  <script src="push.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
