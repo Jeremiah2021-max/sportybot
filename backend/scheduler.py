@@ -45,51 +45,101 @@ def get_pending_predictions(limit: int = MAX_PENDING) -> list:
     and have no outcome row (i.e., is_correct IS NULL).
     """
     cutoff = (datetime.utcnow() - timedelta(minutes=STALE_AFTER)).isoformat()
+    from database import IS_POSTGRES
+
     with get_conn() as conn:
-        rows = conn.execute("""
-            SELECT
-                p.id            AS prediction_id,
-                p.fixture_id,
-                f.home_code     AS home,
-                f.away_code     AS away,
-                f.odd1, f.oddX, f.odd2,
-                p.pick,
-                p.pick_label,
-                p.pick_odd,
-                p.confidence,
-                p.edge_pct,
-                p.value_bet,
-                p.reasoning,
-                p.market,
-                p.predicted_at,
-                o.is_correct
-            FROM predictions p
-            JOIN fixtures f ON p.fixture_id = f.id
-            LEFT JOIN outcomes o ON o.prediction_id = p.id
-            WHERE o.id IS NULL
-              AND p.predicted_at < ?
-            ORDER BY p.predicted_at DESC
-            LIMIT ?
-        """, (cutoff, limit)).fetchall()
+        if IS_POSTGRES:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT
+                    p.id            AS prediction_id,
+                    p.fixture_id,
+                    f.home_code     AS home,
+                    f.away_code     AS away,
+                    f.odd1, f.oddX, f.odd2,
+                    p.pick,
+                    p.pick_label,
+                    p.pick_odd,
+                    p.confidence,
+                    p.edge_pct,
+                    p.value_bet,
+                    p.reasoning,
+                    p.market,
+                    p.predicted_at,
+                    o.is_correct
+                FROM predictions p
+                JOIN fixtures f ON p.fixture_id = f.id
+                LEFT JOIN outcomes o ON o.prediction_id = p.id
+                WHERE o.id IS NULL
+                  AND p.predicted_at < %s
+                ORDER BY p.predicted_at DESC
+                LIMIT %s
+            """, (cutoff, limit))
+            rows = cursor.fetchall()
+        else:
+            rows = conn.execute("""
+                SELECT
+                    p.id            AS prediction_id,
+                    p.fixture_id,
+                    f.home_code     AS home,
+                    f.away_code     AS away,
+                    f.odd1, f.oddX, f.odd2,
+                    p.pick,
+                    p.pick_label,
+                    p.pick_odd,
+                    p.confidence,
+                    p.edge_pct,
+                    p.value_bet,
+                    p.reasoning,
+                    p.market,
+                    p.predicted_at,
+                    o.is_correct
+                FROM predictions p
+                JOIN fixtures f ON p.fixture_id = f.id
+                LEFT JOIN outcomes o ON o.prediction_id = p.id
+                WHERE o.id IS NULL
+                  AND p.predicted_at < ?
+                ORDER BY p.predicted_at DESC
+                LIMIT ?
+            """, (cutoff, limit)).fetchall()
     return [dict(r) for r in rows]
 
 
 def get_accuracy_snapshot() -> dict:
     """Fast accuracy summary from all resolved outcomes."""
+    from database import IS_POSTGRES
+
     with get_conn() as conn:
-        row = conn.execute("""
-            SELECT
-                COUNT(*)                                     AS total,
-                COALESCE(SUM(o.is_correct), 0)               AS wins,
-                COUNT(*) - COALESCE(SUM(o.is_correct), 0)    AS losses,
-                ROUND(AVG(o.is_correct) * 100, 1)            AS win_rate,
-                ROUND(SUM(o.profit_loss), 2)                  AS profit,
-                COUNT(CASE WHEN p.value_bet=1 THEN 1 END)    AS total_value_bets,
-                ROUND(AVG(CASE WHEN p.value_bet=1
-                               THEN o.is_correct END)*100,1) AS value_win_rate
-            FROM outcomes o
-            JOIN predictions p ON o.prediction_id = p.id
-        """).fetchone()
+        if IS_POSTGRES:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT
+                    COUNT(*)                                     AS total,
+                    COALESCE(SUM(o.is_correct), 0)               AS wins,
+                    COUNT(*) - COALESCE(SUM(o.is_correct), 0)    AS losses,
+                    ROUND(AVG(o.is_correct) * 100, 1)            AS win_rate,
+                    ROUND(SUM(o.profit_loss), 2)                  AS profit,
+                    COUNT(CASE WHEN p.value_bet=1 THEN 1 END)    AS total_value_bets,
+                    ROUND(AVG(CASE WHEN p.value_bet=1
+                                   THEN o.is_correct END)*100,1) AS value_win_rate
+                FROM outcomes o
+                JOIN predictions p ON o.prediction_id = p.id
+            """)
+            row = cursor.fetchone()
+        else:
+            row = conn.execute("""
+                SELECT
+                    COUNT(*)                                     AS total,
+                    COALESCE(SUM(o.is_correct), 0)               AS wins,
+                    COUNT(*) - COALESCE(SUM(o.is_correct), 0)    AS losses,
+                    ROUND(AVG(o.is_correct) * 100, 1)            AS win_rate,
+                    ROUND(SUM(o.profit_loss), 2)                  AS profit,
+                    COUNT(CASE WHEN p.value_bet=1 THEN 1 END)    AS total_value_bets,
+                    ROUND(AVG(CASE WHEN p.value_bet=1
+                                   THEN o.is_correct END)*100,1) AS value_win_rate
+                FROM outcomes o
+                JOIN predictions p ON o.prediction_id = p.id
+            """).fetchone()
     if not row:
         return {"total": 0, "wins": 0, "losses": 0, "win_rate": 0,
                 "profit": 0, "total_value_bets": 0, "value_win_rate": 0}
@@ -103,37 +153,73 @@ def resolve_prediction(prediction_id: int, result: str,
     result: "win" | "loss"
     Returns the updated accuracy snapshot.
     """
+    from database import IS_POSTGRES
+
     is_correct = result == "win"
     with get_conn() as conn:
-        # Check prediction exists and isn't already resolved
-        pred = conn.execute(
-            "SELECT id, fixture_id, pick_odd FROM predictions WHERE id = ?",
-            (prediction_id,)
-        ).fetchone()
-        if not pred:
-            raise ValueError(f"Prediction {prediction_id} not found")
+        if IS_POSTGRES:
+            cursor = conn.cursor()
+            # Check prediction exists and isn't already resolved
+            cursor.execute(
+                "SELECT id, fixture_id, pick_odd FROM predictions WHERE id = %s",
+                (prediction_id,)
+            )
+            pred = cursor.fetchone()
+            if not pred:
+                raise ValueError(f"Prediction {prediction_id} not found")
 
-        existing = conn.execute(
-            "SELECT id FROM outcomes WHERE prediction_id = ?",
-            (prediction_id,)
-        ).fetchone()
-        if existing:
-            raise ValueError(f"Prediction {prediction_id} already resolved")
+            cursor.execute(
+                "SELECT id FROM outcomes WHERE prediction_id = %s",
+                (prediction_id,)
+            )
+            existing = cursor.fetchone()
+            if existing:
+                raise ValueError(f"Prediction {prediction_id} already resolved")
 
-        profit = stake * (float(pred["pick_odd"]) - 1) if is_correct else -stake
+            profit = stake * (float(pred["pick_odd"]) - 1) if is_correct else -stake
 
-        conn.execute("""
-            INSERT INTO outcomes
-              (fixture_id, prediction_id, actual_result, is_correct, stake, profit_loss)
-            VALUES (?, ?, ?, ?, ?, ?)
-        """, (
-            pred["fixture_id"],
-            prediction_id,
-            result,
-            int(is_correct),
-            stake,
-            profit,
-        ))
+            cursor.execute("""
+                INSERT INTO outcomes
+                  (fixture_id, prediction_id, actual_result, is_correct, stake, profit_loss)
+                VALUES (%s, %s, %s, %s, %s, %s)
+            """, (
+                pred["fixture_id"],
+                prediction_id,
+                result,
+                int(is_correct),
+                stake,
+                profit,
+            ))
+        else:
+            # Check prediction exists and isn't already resolved
+            pred = conn.execute(
+                "SELECT id, fixture_id, pick_odd FROM predictions WHERE id = ?",
+                (prediction_id,)
+            ).fetchone()
+            if not pred:
+                raise ValueError(f"Prediction {prediction_id} not found")
+
+            existing = conn.execute(
+                "SELECT id FROM outcomes WHERE prediction_id = ?",
+                (prediction_id,)
+            ).fetchone()
+            if existing:
+                raise ValueError(f"Prediction {prediction_id} already resolved")
+
+            profit = stake * (float(pred["pick_odd"]) - 1) if is_correct else -stake
+
+            conn.execute("""
+                INSERT INTO outcomes
+                  (fixture_id, prediction_id, actual_result, is_correct, stake, profit_loss)
+                VALUES (?, ?, ?, ?, ?, ?)
+            """, (
+                pred["fixture_id"],
+                prediction_id,
+                result,
+                int(is_correct),
+                stake,
+                profit,
+            ))
 
     return get_accuracy_snapshot()
 

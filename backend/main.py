@@ -1,7 +1,7 @@
 """
 Virtual Edge – Backend  v3.0
 =============================
-Engines:   Gemini 1.5-pro/flash → OpenAI GPT-4o-mini → Google Cloud Vision → Tesseract fallback
+Engines:   Groq (Llama/Mixtral) → Gemini 1.5-pro/flash → OpenAI GPT-4o-mini → Google Cloud Vision → Tesseract fallback
 Analytics: analytics.py  – Poisson + Kelly + value-bet engine (runs locally, no API cost)
 Auth:      auth.py       – JWT registration / login
 DB:        database.py   – SQLAlchemy ORM + raw SQLite helpers
@@ -424,8 +424,19 @@ Rules: no negative Kelly picks; confidence 50-65=low, 66-79=medium, 80+=high."""
 
 
 async def _run_ai_prediction(matches: List[dict], feedback: List[dict]) -> dict:
+    # Try Groq first, fall back to Gemini
+    groq_key = os.getenv("GROQ_API_KEY")
+    if groq_key:
+        try:
+            return await _run_groq_prediction(matches, feedback)
+        except Exception as e:
+            print(f"Groq prediction failed: {e}, trying Gemini")
+
+    # Fallback to Gemini
     import google.generativeai as genai
     api_key = os.getenv("GOOGLE_AI_STUDIO_KEY") or os.getenv("GEMINI_API_KEY")
+    if not api_key:
+        raise RuntimeError("No AI key configured — set GROQ_API_KEY or GOOGLE_AI_STUDIO_KEY")
     genai.configure(api_key=api_key)
 
     block = "".join(
@@ -482,6 +493,68 @@ Return ONLY a valid JSON object (no markdown):
     if m:
         content = m.group(0)
     return json.loads(content)
+
+
+async def _run_groq_prediction(matches: List[dict], feedback: List[dict]) -> dict:
+    from groq import Groq
+    client = Groq(api_key=os.getenv("GROQ_API_KEY"))
+
+    block = "".join(
+        f"Match {i}: {m['home']} vs {m['away']} | "
+        f"odd1={m['odd1']}  oddX={m['oddX']}  odd2={m['odd2']}\n"
+        for i, m in enumerate(matches, 1)
+    )
+
+    prompt = f"""Analyse these SportyBet Instant Virtuals matches.
+
+MATCHES:
+{block}
+{build_few_shot_block(feedback)}
+
+Return ONLY a valid JSON object (no markdown):
+{{
+  "predictions": [{{
+    "home":"TEAM","away":"TEAM",
+    "best_pick":{{"pick":"1|X|2","label":"HOME WIN (T)|DRAW|AWAY WIN (T)",
+                 "odd":"2.10","confidence":72,"edge_pct":4.2,
+                 "reasoning":"One sentence."}},
+    "safe_pick":{{"pick":"1X|X2|12","label":"Home or Draw",
+                 "odd":"1.45","confidence":85,"edge_pct":2.1,
+                 "reasoning":"One sentence."}},
+    "fair_p1":0.48,"fair_pX":0.28,"fair_p2":0.24,
+    "overround_pct":7.2,"kelly_fraction":0.062,"value_bet":true
+  }}],
+  "accumulator":[
+    {{"home":"T","away":"T","pick":"1","odd":"2.10","reasoning":"reason"}},
+    {{"home":"T","away":"T","pick":"X","odd":"3.40","reasoning":"reason"}}
+  ],
+  "acca_combined_odd":"7.14",
+  "acca_reasoning":"One sentence."
+}}"""
+
+    # Try multiple Groq models in order of preference
+    models = ["llama-3.3-70b-versatile", "llama-3.1-70b-versatile", "mixtral-8x7b-32768"]
+
+    for model_name in models:
+        try:
+            response = client.chat.completions.create(
+                model=model_name,
+                messages=[
+                    {"role": "system", "content": PREDICT_SYSTEM},
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=0.2,
+                max_tokens=3000,
+                response_format={"type": "json_object"}
+            )
+            content = response.choices[0].message.content.strip()
+            if content:
+                return json.loads(content)
+        except Exception as e:
+            print(f"Groq {model_name} failed: {e}")
+            continue
+
+    raise RuntimeError("All Groq prediction models failed")
 
 
 def _poisson_market_data(o1: float, oX: float, o2: float) -> Optional[MarketData]:
@@ -747,9 +820,10 @@ async def predict_endpoint(
     if len(matches) > 12:
         raise HTTPException(400, "Maximum 12 matches per request")
 
+    groq_key = os.getenv("GROQ_API_KEY")
     gemini_key = os.getenv("GOOGLE_AI_STUDIO_KEY") or os.getenv("GEMINI_API_KEY")
-    if not gemini_key:
-        raise HTTPException(503, "No AI key configured — set GOOGLE_AI_STUDIO_KEY")
+    if not groq_key and not gemini_key:
+        raise HTTPException(503, "No AI key configured — set GROQ_API_KEY or GOOGLE_AI_STUDIO_KEY")
 
     # Bankroll from auth user if logged in
     bankroll = 0.0
@@ -1206,10 +1280,12 @@ def monitoring_endpoint(token_payload: Optional[dict] = Depends(get_optional_use
 # ──────────────────────────────────────────────────────────────────
 @app.get("/health")
 def health():
+    groq_key = os.getenv("GROQ_API_KEY")
     gemini_key = os.getenv("GOOGLE_AI_STUDIO_KEY") or os.getenv("GEMINI_API_KEY")
     return {
         "status":        "ok",
         "version":       "5.0",
+        "groq":          bool(groq_key),
         "gemini":        bool(gemini_key),
         "openai":        bool(os.getenv("OPENAI_API_KEY")),
         "google_vision": bool(os.getenv("GOOGLE_APPLICATION_CREDENTIALS")),

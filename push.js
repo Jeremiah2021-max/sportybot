@@ -20,7 +20,7 @@ const BACKEND_WS  = (() => {
   return stored.replace(/^http/, "ws");  // http→ws, https→wss
 })();
 
-const BACKEND_URL = localStorage.getItem("ve_backend") || "http://localhost:8000";
+// BACKEND_URL is defined in app.js, use it from global scope
 
 const VEPush = (() => {
   let _ws         = null;
@@ -54,7 +54,7 @@ const VEPush = (() => {
   async function _subscribePush(reg) {
     try {
       // Get VAPID public key from backend
-      const res = await fetch(`${BACKEND_URL}/api/push/vapid-public-key`);
+      const res = await fetch(`${window.BACKEND_URL}/api/push/vapid-public-key`);
       if (!res.ok) {
         console.warn("[VEPush] No VAPID key on server yet — push disabled");
         return;
@@ -71,7 +71,7 @@ const VEPush = (() => {
       }
 
       // Send subscription to backend
-      await fetch(`${BACKEND_URL}/api/push/subscribe`, {
+      await fetch(`${window.BACKEND_URL}/api/push/subscribe`, {
         method:  "POST",
         headers: { "Content-Type": "application/json" },
         body:    JSON.stringify({

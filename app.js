@@ -4,6 +4,10 @@
 
 const STORAGE_KEY = "virtualEdge_data_v1";
 
+// Backend URL (shared with push.js via window scope)
+const BACKEND_URL = localStorage.getItem("ve_backend") || "http://localhost:8000";
+window.BACKEND_URL = BACKEND_URL;
+
 // State
 let state = {
   bankroll: 0,
@@ -122,9 +126,6 @@ function handleFile(file) {
   document.getElementById("ocrStatus").classList.add("hidden");
 }
 
-// Backend URL – change this when you deploy the backend
-const BACKEND_URL = localStorage.getItem("ve_backend") || "http://localhost:8000";
-
 // Stores the last AI prediction response
 let lastPrediction = null;
 
@@ -223,7 +224,7 @@ async function runOCR() {
       const controller = new AbortController();
       const timeout    = setTimeout(() => controller.abort(), 20000);
 
-      const res = await fetch(`${BACKEND_URL}/api/ocr`, {
+      const res = await fetch(`${window.BACKEND_URL}/api/ocr`, {
         method: "POST",
         body:   formData,
         signal: controller.signal,
@@ -284,7 +285,7 @@ async function runOCR() {
         const controller2 = new AbortController();
         const timeout2    = setTimeout(() => controller2.abort(), 45000);
 
-        const predRes = await fetch(`${BACKEND_URL}/api/predict`, {
+        const predRes = await fetch(`${window.BACKEND_URL}/api/predict`, {
           method:  "POST",
           headers: { "Content-Type": "application/json" },
           // Pass session_id so backend broadcast hits this tab's WS
@@ -592,7 +593,7 @@ async function submitFeedback(btn, result) {
 
   // Send to backend
   try {
-    await fetch(`${BACKEND_URL}/api/feedback`, {
+    await fetch(`${window.BACKEND_URL}/api/feedback`, {
       method:  "POST",
       headers: { "Content-Type": "application/json" },
       body:    JSON.stringify([item])
@@ -1349,7 +1350,7 @@ function setupHistory() {
 // ── Accuracy meter ───────────────────────────────────────────────
 async function loadAccuracy() {
   try {
-    const res = await fetch(`${BACKEND_URL}/api/accuracy`);
+    const res = await fetch(`${window.BACKEND_URL}/api/accuracy`);
     if (!res.ok) return;
     const acc = await res.json();
     renderAccuracyMeter(acc);
@@ -1408,7 +1409,7 @@ async function loadPendingPredictions() {
   list.innerHTML = `<p class="empty pending-loading">⏳ Loading pending predictions…</p>`;
 
   try {
-    const res = await fetch(`${BACKEND_URL}/api/predictions/pending`);
+    const res = await fetch(`${window.BACKEND_URL}/api/predictions/pending`);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const { pending, accuracy } = await res.json();
 
@@ -1474,7 +1475,7 @@ async function resolvePrediction(predictionId, result, btn) {
   }
 
   try {
-    const res = await fetch(`${BACKEND_URL}/api/predictions/${predictionId}/resolve`, {
+    const res = await fetch(`${window.BACKEND_URL}/api/predictions/${predictionId}/resolve`, {
       method:  "POST",
       headers: { "Content-Type": "application/json" },
       body:    JSON.stringify({ result, stake: 0 }),
