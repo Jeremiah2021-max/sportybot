@@ -56,7 +56,7 @@ def get_pending_predictions(limit: int = MAX_PENDING) -> list:
                     p.fixture_id,
                     f.home_code     AS home,
                     f.away_code     AS away,
-                    f.odd1, f.oddX, f.odd2,
+                    f.odd1, f."oddX", f.odd2,
                     p.pick,
                     p.pick_label,
                     p.pick_odd,
@@ -115,13 +115,13 @@ def get_accuracy_snapshot() -> dict:
             cursor.execute("""
                 SELECT
                     COUNT(*)                                     AS total,
-                    COALESCE(SUM(o.is_correct), 0)               AS wins,
-                    COUNT(*) - COALESCE(SUM(o.is_correct), 0)    AS losses,
-                    ROUND(AVG(o.is_correct) * 100, 1)            AS win_rate,
+                    COALESCE(SUM(CASE WHEN o.is_correct THEN 1 ELSE 0 END), 0) AS wins,
+                    COUNT(*) - COALESCE(SUM(CASE WHEN o.is_correct THEN 1 ELSE 0 END), 0) AS losses,
+                    ROUND(AVG(CASE WHEN o.is_correct THEN 1 ELSE 0 END) * 100, 1) AS win_rate,
                     ROUND(SUM(o.profit_loss), 2)                  AS profit,
-                    COUNT(CASE WHEN p.value_bet=1 THEN 1 END)    AS total_value_bets,
-                    ROUND(AVG(CASE WHEN p.value_bet=1
-                                   THEN o.is_correct END)*100,1) AS value_win_rate
+                    COUNT(CASE WHEN p.value_bet=TRUE THEN 1 END) AS total_value_bets,
+                    ROUND(AVG(CASE WHEN p.value_bet=TRUE
+                                   THEN CASE WHEN o.is_correct THEN 1 ELSE 0 END END)*100,1) AS value_win_rate
                 FROM outcomes o
                 JOIN predictions p ON o.prediction_id = p.id
             """)
@@ -130,13 +130,13 @@ def get_accuracy_snapshot() -> dict:
             row = conn.execute("""
                 SELECT
                     COUNT(*)                                     AS total,
-                    COALESCE(SUM(o.is_correct), 0)               AS wins,
-                    COUNT(*) - COALESCE(SUM(o.is_correct), 0)    AS losses,
-                    ROUND(AVG(o.is_correct) * 100, 1)            AS win_rate,
+                    COALESCE(SUM(CASE WHEN o.is_correct THEN 1 ELSE 0 END), 0) AS wins,
+                    COUNT(*) - COALESCE(SUM(CASE WHEN o.is_correct THEN 1 ELSE 0 END), 0) AS losses,
+                    ROUND(AVG(CASE WHEN o.is_correct THEN 1 ELSE 0 END) * 100, 1) AS win_rate,
                     ROUND(SUM(o.profit_loss), 2)                  AS profit,
                     COUNT(CASE WHEN p.value_bet=1 THEN 1 END)    AS total_value_bets,
                     ROUND(AVG(CASE WHEN p.value_bet=1
-                                   THEN o.is_correct END)*100,1) AS value_win_rate
+                                   THEN CASE WHEN o.is_correct THEN 1 ELSE 0 END END)*100,1) AS value_win_rate
                 FROM outcomes o
                 JOIN predictions p ON o.prediction_id = p.id
             """).fetchone()
@@ -251,7 +251,7 @@ async def results_checker_job():
             "type":    "pending_alert",
             "count":   len(pending),
             "message": (
-                f"📋 {len(pending)} prediction"
+                f"{len(pending)} prediction"
                 f"{'s' if len(pending) != 1 else ''} waiting for results. "
                 f"Log them in the Results Checker to track accuracy."
             ),
