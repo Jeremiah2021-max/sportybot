@@ -117,11 +117,11 @@ def get_accuracy_snapshot() -> dict:
                     COUNT(*)                                     AS total,
                     COALESCE(SUM(CASE WHEN o.is_correct THEN 1 ELSE 0 END), 0) AS wins,
                     COUNT(*) - COALESCE(SUM(CASE WHEN o.is_correct THEN 1 ELSE 0 END), 0) AS losses,
-                    ROUND(AVG(CASE WHEN o.is_correct THEN 1 ELSE 0 END) * 100, 1) AS win_rate,
-                    ROUND(SUM(o.profit_loss), 2)                  AS profit,
+                    ROUND((AVG(CASE WHEN o.is_correct THEN 1 ELSE 0 END) * 100)::numeric, 1) AS win_rate,
+                    ROUND(SUM(o.profit_loss)::numeric, 2)       AS profit,
                     COUNT(CASE WHEN p.value_bet=TRUE THEN 1 END) AS total_value_bets,
-                    ROUND(AVG(CASE WHEN p.value_bet=TRUE
-                                   THEN CASE WHEN o.is_correct THEN 1 ELSE 0 END END)*100,1) AS value_win_rate
+                    ROUND((AVG(CASE WHEN p.value_bet=TRUE
+                                   THEN CASE WHEN o.is_correct THEN 1 ELSE 0 END END)*100)::numeric,1) AS value_win_rate
                 FROM outcomes o
                 JOIN predictions p ON o.prediction_id = p.id
             """)
