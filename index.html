@@ -141,6 +141,15 @@
           <span class="btn-text">Analyze Matches</span>
           <span class="spinner hidden"></span>
         </button>
+
+        <div class="api-key-toggle-wrap">
+          <button type="button" id="toggleApiKeyBtn" class="link-btn">⚙️ AI Vision (Optional Free Gemini Key)</button>
+          <div id="apiKeyRow" class="api-key-row hidden">
+            <input type="password" id="geminiApiKeyInput" placeholder="Paste Google AI Studio Key" />
+            <button type="button" id="saveApiKeyBtn" class="btn-small">Save</button>
+          </div>
+          <div id="apiKeyNotice" class="api-key-notice hidden">✓ AI Vision Key Active</div>
+        </div>
       </div>
 
       <!-- OCR Status -->

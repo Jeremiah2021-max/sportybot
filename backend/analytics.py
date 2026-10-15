@@ -116,11 +116,11 @@ def _best_double_chance(
     o1: float, oX: float, o2: float,
     home: str, away: str,
 ) -> dict:
-    """Return the safest double-chance pick."""
+    """Return the safest double-chance pick with explicit team names."""
     dc_options = [
-        {"pick": "1X", "label": "Home or Draw",  "prob": fair_p1 + fair_pX},
-        {"pick": "X2", "label": "Draw or Away",  "prob": fair_pX + fair_p2},
-        {"pick": "12", "label": "Home or Away",  "prob": fair_p1 + fair_p2},
+        {"pick": "1X", "label": f"{home} or Draw (Home/Draw)", "prob": fair_p1 + fair_pX},
+        {"pick": "X2", "label": f"Draw or {away} (Draw/Away)", "prob": fair_pX + fair_p2},
+        {"pick": "12", "label": f"{home} or {away} (Home/Away)", "prob": fair_p1 + fair_p2},
     ]
     best = max(dc_options, key=lambda x: x["prob"])
 
@@ -130,13 +130,13 @@ def _best_double_chance(
 
     return {
         "pick":       best["pick"],
-        "label":      best["label"],
+        "label":      f"Double Chance {best['pick']}: {best['label']}",
         "odd":        f"{approx_odd:.2f}",
         "confidence": conf,
         "edge_pct":   0.0,
         "reasoning":  (
-            f"Double chance {best['pick']} covers {round(best['prob']*100)}% "
-            f"of outcomes — safest option in this match."
+            f"Double chance {best['pick']} ({best['label']}) covers {round(best['prob']*100)}% "
+            f"of outcomes — safest option for {home} vs {away}."
         ),
     }
 

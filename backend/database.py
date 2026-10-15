@@ -619,7 +619,7 @@ def get_team_leaderboard(limit: int = 20) -> list:
     with get_conn() as conn:
         return _fetchall(conn, """
             SELECT code, full_name, total_matches, wins, draws, losses,
-                   ROUND(CAST(wins AS REAL) / GREATEST(total_matches, 1) * 100, 1) AS win_pct
+                   ROUND(CAST(wins AS REAL) / (CASE WHEN total_matches > 0 THEN total_matches ELSE 1 END) * 100, 1) AS win_pct
             FROM teams
             WHERE total_matches > 0
             ORDER BY win_pct DESC, total_matches DESC

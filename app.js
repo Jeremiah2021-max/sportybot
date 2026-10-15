@@ -24,6 +24,7 @@ document.addEventListener("DOMContentLoaded", () => {
   loadState();
   setupTabs();
   setupUpload();
+  setupApiKeyToggle();
   setupBankroll();
   setupHistory();
   setupRealtimeFeed();
@@ -103,6 +104,39 @@ function setupUpload() {
   });
 
   analyzeBtn.addEventListener("click", runOCR);
+}
+
+function setupApiKeyToggle() {
+  const toggleBtn = document.getElementById("toggleApiKeyBtn");
+  const row = document.getElementById("apiKeyRow");
+  const input = document.getElementById("geminiApiKeyInput");
+  const saveBtn = document.getElementById("saveApiKeyBtn");
+  const notice = document.getElementById("apiKeyNotice");
+
+  if (!toggleBtn || !row) return;
+
+  const savedKey = localStorage.getItem("ve_gemini_key") || "";
+  if (savedKey) {
+    input.value = savedKey;
+    if (notice) notice.classList.remove("hidden");
+  }
+
+  toggleBtn.addEventListener("click", () => {
+    row.classList.toggle("hidden");
+  });
+
+  saveBtn.addEventListener("click", () => {
+    const val = input.value.trim();
+    if (val) {
+      localStorage.setItem("ve_gemini_key", val);
+      if (notice) notice.classList.remove("hidden");
+      row.classList.add("hidden");
+      alert("AI Vision key saved! Next screenshot upload will use Google Gemini Vision.");
+    } else {
+      localStorage.removeItem("ve_gemini_key");
+      if (notice) notice.classList.add("hidden");
+    }
+  });
 }
 
 function handleFile(file) {
@@ -221,13 +255,20 @@ async function runOCR() {
       const formData = new FormData();
       formData.append("image", currentImage);
 
+      const userKey = localStorage.getItem("ve_gemini_key") || "";
+      const ocrHeaders = {};
+      if (userKey) {
+        ocrHeaders["X-Gemini-Key"] = userKey;
+      }
+
       const controller = new AbortController();
-      const timeout    = setTimeout(() => controller.abort(), 20000);
+      const timeout    = setTimeout(() => controller.abort(), 25000);
 
       const res = await fetch(`${window.BACKEND_URL}/api/ocr`, {
-        method: "POST",
-        body:   formData,
-        signal: controller.signal,
+        method:  "POST",
+        body:    formData,
+        headers: ocrHeaders,
+        signal:  controller.signal,
       });
       clearTimeout(timeout);
 
@@ -245,7 +286,9 @@ async function runOCR() {
 
     // Fallback: local Tesseract
     if (!usedBackend) {
-      setStatus("Using local OCR (Tesseract)…", 15);
+      setStatus("Preprocessing screenshot for local OCR…", 15);
+      const preprocessed = await preprocessImageForOCR(currentImage);
+
       const worker = await Tesseract.createWorker("eng", 1, {
         logger: m => {
           if (m.status === "recognizing text") {
@@ -256,7 +299,7 @@ async function runOCR() {
           }
         },
       });
-      const { data: { text } } = await worker.recognize(currentImage);
+      const { data: { text } } = await worker.recognize(preprocessed);
       await worker.terminate();
       setStatus("Parsing SportyBet layout…", 40);
       state.matches = parseOCRText(text);
@@ -281,13 +324,19 @@ async function runOCR() {
       // Keep skeletons visible while AI call is in flight
       setStatus("Running AI + Poisson prediction engine…", 60);
 
+      const userKey = localStorage.getItem("ve_gemini_key") || "";
+      const predHeaders = { "Content-Type": "application/json" };
+      if (userKey) {
+        predHeaders["X-Gemini-Key"] = userKey;
+      }
+
       try {
         const controller2 = new AbortController();
         const timeout2    = setTimeout(() => controller2.abort(), 45000);
 
         const predRes = await fetch(`${window.BACKEND_URL}/api/predict`, {
           method:  "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: predHeaders,
           // Pass session_id so backend broadcast hits this tab's WS
           body:    JSON.stringify(validMatches, null, 0),
           signal:  controller2.signal,
@@ -303,13 +352,35 @@ async function runOCR() {
           }
           setStatus("Predictions ready!", 100);
         } else {
-          const err = await predRes.json().catch(() => ({}));
-          console.warn("Prediction API error:", err);
-          setStatus("OCR done — AI prediction unavailable", 100);
+          // If /api/predict fails or has no AI key, fall back to pure Poisson /api/analyse
+          console.warn("Prediction API returned error, falling back to /api/analyse");
+          const analyseRes = await fetch(`${window.BACKEND_URL}/api/analyse`, {
+            method:  "POST",
+            headers: { "Content-Type": "application/json" },
+            body:    JSON.stringify(validMatches, null, 0),
+          });
+          if (analyseRes.ok) {
+            lastPrediction = await analyseRes.json();
+            setStatus("Predictions ready (Poisson engine)!", 100);
+          } else {
+            setStatus("OCR done — fill in odds to get predictions", 100);
+          }
         }
       } catch (predErr) {
-        console.warn("Prediction request failed:", predErr.message);
-        setStatus("OCR done — AI prediction timed out", 100);
+        console.warn("Prediction request failed, falling back to /api/analyse:", predErr.message);
+        try {
+          const analyseRes = await fetch(`${window.BACKEND_URL}/api/analyse`, {
+            method:  "POST",
+            headers: { "Content-Type": "application/json" },
+            body:    JSON.stringify(validMatches, null, 0),
+          });
+          if (analyseRes.ok) {
+            lastPrediction = await analyseRes.json();
+            setStatus("Predictions ready (Poisson engine)!", 100);
+          }
+        } catch (analyseErr) {
+          setStatus("OCR done — prediction timed out", 100);
+        }
       }
     } else {
       setStatus("OCR done — fill in odds to get predictions", 100);
@@ -462,16 +533,32 @@ function renderAIPredictions(prediction) {
 
     const card = document.createElement("div");
     card.className = `rec-card ${p.value_bet ? "value" : ""}`;
+
+    // Calculate all 3 DC options
+    const p1 = p.fair_p1 || 0.33;
+    const pX = p.fair_pX || 0.33;
+    const p2 = p.fair_p2 || 0.34;
+    const dc1X_pct = Math.round((p1 + pX) * 100);
+    const dc12_pct = Math.round((p1 + p2) * 100);
+    const dcX2_pct = Math.round((pX + p2) * 100);
+    const dc1X_odd = (1 / ((p1 + pX) * 0.92)).toFixed(2);
+    const dc12_odd = (1 / ((p1 + p2) * 0.92)).toFixed(2);
+    const dcX2_odd = (1 / ((pX + p2) * 0.92)).toFixed(2);
+
     card.innerHTML = `
       ${p.value_bet
         ? `<span class="value-badge">VALUE BET</span>`
         : `<span class="rank">#${i + 1}</span>`}
 
-      <div class="match-name">${escapeHtml(p.home)} vs ${escapeHtml(p.away)}</div>
+      <div class="match-teams-header">
+        <div class="team-badge-chip home-chip"><span class="chip-sub">HOME</span> <strong>${escapeHtml(p.home)}</strong></div>
+        <span class="vs-badge">VS</span>
+        <div class="team-badge-chip away-chip"><span class="chip-sub">AWAY</span> <strong>${escapeHtml(p.away)}</strong></div>
+      </div>
 
       <div class="ai-pick-row">
         <div class="ai-pick-main">
-          <span class="pick-label-sm">Best pick</span>
+          <span class="pick-label-sm">Primary 1X2 Recommendation</span>
           <span class="pick-text">${escapeHtml(bp.label)}</span>
           <span class="pick-odd">@ ${bp.odd}</span>
         </div>
@@ -480,6 +567,28 @@ function renderAIPredictions(prediction) {
 
       <div class="ai-reasoning">"${escapeHtml(bp.reasoning)}"</div>
 
+      <!-- Double Chance for EVERY match -->
+      <div class="dc-match-section">
+        <div class="dc-section-header">
+          <span>🛡️ Double Chance (DC) Markets</span>
+          <span class="dc-best-badge">Safest: <strong>${escapeHtml(sp.pick)}</strong> (~${sp.odd})</span>
+        </div>
+        <div class="dc-options-grid">
+          <div class="dc-pill ${sp.pick === '1X' ? 'dc-recommended' : ''}">
+            <span class="dc-name">1X: ${escapeHtml(p.home)} or Draw</span>
+            <span class="dc-stats">${dc1X_pct}% • ~${dc1X_odd}</span>
+          </div>
+          <div class="dc-pill ${sp.pick === '12' ? 'dc-recommended' : ''}">
+            <span class="dc-name">12: ${escapeHtml(p.home)} or ${escapeHtml(p.away)}</span>
+            <span class="dc-stats">${dc12_pct}% • ~${dc12_odd}</span>
+          </div>
+          <div class="dc-pill ${sp.pick === 'X2' ? 'dc-recommended' : ''}">
+            <span class="dc-name">X2: Draw or ${escapeHtml(p.away)}</span>
+            <span class="dc-stats">${dcX2_pct}% • ~${dcX2_odd}</span>
+          </div>
+        </div>
+      </div>
+
       <div class="meta">
         <span>Edge: <strong class="${bp.edge_pct >= 3 ? "edge-positive" : "edge-neutral"}">${bp.edge_pct.toFixed(1)}%</strong></span>
         <span>Overround: <strong>${p.overround_pct.toFixed(1)}%</strong></span>
@@ -487,29 +596,23 @@ function renderAIPredictions(prediction) {
 
       <div class="odds-bar-wrap">
         <div class="odds-bar-row">
-          <span>1</span>
+          <span>1 (${escapeHtml(p.home)})</span>
           <div class="odds-bar"><div class="odds-fill home-fill" style="width:${Math.round(p.fair_p1*100)}%"></div></div>
           <span>${Math.round(p.fair_p1*100)}%</span>
         </div>
         <div class="odds-bar-row">
-          <span>X</span>
+          <span>X (Draw)</span>
           <div class="odds-bar"><div class="odds-fill draw-fill" style="width:${Math.round(p.fair_pX*100)}%"></div></div>
           <span>${Math.round(p.fair_pX*100)}%</span>
         </div>
         <div class="odds-bar-row">
-          <span>2</span>
+          <span>2 (${escapeHtml(p.away)})</span>
           <div class="odds-bar"><div class="odds-fill away-fill" style="width:${Math.round(p.fair_p2*100)}%"></div></div>
           <span>${Math.round(p.fair_p2*100)}%</span>
         </div>
       </div>
 
       ${marketsHtml}
-
-      <div class="safe-pick-row">
-        Safe: <strong>${escapeHtml(sp.pick)}</strong> — ${escapeHtml(sp.label)}
-        <span class="safe-odd">@ ~${sp.odd}</span>
-        <span class="safe-prob">(${sp.confidence}% conf)</span>
-      </div>
 
       ${stakeHtml}
 
@@ -781,140 +884,237 @@ function renderLiveFeed() {
 }
 
 // ======================
-// SportyBet Ghana Instant Virtuals – specialized OCR parser
-// Handles short team codes (BRE, ARS, BMU, RMA...) and full names
+// SportyBet Ghana Instant Virtuals – 3-Letter Team Registry
+// ======================
+const SPORTYBET_TEAMS = {
+  // Premier League / England Virtuals
+  "ARSENAL": "ARS", "ARS": "ARS",
+  "ASTON VILLA": "AVL", "AST": "AVL", "AVL": "AVL", "VILLA": "AVL",
+  "BOURNEMOUTH": "BOU", "BOU": "BOU",
+  "BRENTFORD": "BRE", "BRE": "BRE",
+  "BRIGHTON": "BHA", "BHA": "BHA",
+  "CHELSEA": "CHE", "CHE": "CHE",
+  "CRYSTAL PALACE": "CRY", "CRY": "CRY", "PALACE": "CRY",
+  "EVERTON": "EVE", "EVE": "EVE",
+  "FULHAM": "FUL", "FUL": "FUL",
+  "IPSWICH": "IPS", "IPSWICH TOWN": "IPS", "IPS": "IPS",
+  "LEICESTER": "LEI", "LEICESTER CITY": "LEI", "LEI": "LEI",
+  "LIVERPOOL": "LIV", "LIV": "LIV",
+  "MANCHESTER CITY": "MCI", "MAN CITY": "MCI", "MCI": "MCI",
+  "MANCHESTER UNITED": "MUN", "MAN UNITED": "MUN", "MAN UTD": "MUN", "MUN": "MUN",
+  "NEWCASTLE": "NEW", "NEWCASTLE UNITED": "NEW", "NEW": "NEW",
+  "NOTTINGHAM FOREST": "NFO", "NOTTINGHAM": "NFO", "FOREST": "NFO", "NFO": "NFO",
+  "SOUTHAMPTON": "SOU", "SOU": "SOU",
+  "TOTTENHAM": "TOT", "SPURS": "TOT", "TOT": "TOT",
+  "WEST HAM": "WHU", "WEST HAM UNITED": "WHU", "WHU": "WHU",
+  "WOLVES": "WOL", "WOLVERHAMPTON": "WOL", "WOL": "WOL",
+
+  // La Liga / Spain
+  "REAL MADRID": "RMA", "RMA": "RMA",
+  "BARCELONA": "BAR", "BAR": "BAR", "BCN": "BAR",
+  "ATLETICO MADRID": "ATM", "ATLETICO": "ATM", "ATM": "ATM",
+  "SEVILLA": "SEV", "SEV": "SEV",
+  "VALENCIA": "VAL", "VAL": "VAL",
+  "ATHLETIC BILBAO": "ATH", "BILBAO": "ATH", "ATH": "ATH",
+  "REAL SOCIEDAD": "RSO", "RSO": "RSO",
+  "VILLARREAL": "VIL", "VIL": "VIL",
+  "REAL BETIS": "BET", "BETIS": "BET", "BET": "BET",
+
+  // Serie A / Italy
+  "JUVENTUS": "JUV", "JUV": "JUV",
+  "AC MILAN": "MIL", "MILAN": "MIL", "MIL": "MIL",
+  "INTER": "INT", "INTER MILAN": "INT", "INT": "INT",
+  "NAPOLI": "NAP", "NAP": "NAP",
+  "ROMA": "ROM", "AS ROMA": "ROM", "ROM": "ROM",
+  "LAZIO": "LAZ", "LAZ": "LAZ",
+  "ATALANTA": "ATA", "ATA": "ATA",
+  "FIORENTINA": "FIO", "FIO": "FIO",
+
+  // Bundesliga / Germany
+  "BAYERN": "BAY", "BAYERN MUNICH": "BAY", "BAY": "BAY",
+  "DORTMUND": "DOR", "BORUSSIA DORTMUND": "DOR", "DOR": "DOR",
+  "LEVERKUSEN": "LEV", "BAYER LEVERKUSEN": "LEV", "LEV": "LEV",
+  "LEIPZIG": "RBL", "RB LEIPZIG": "RBL", "RBL": "RBL"
+};
+
+function cleanTeam(name) {
+  if (!name) return "";
+  let raw = String(name).replace(/[^a-zA-Z0-9\s]/g, "").replace(/\s+/g, " ").trim().toUpperCase();
+  if (SPORTYBET_TEAMS[raw]) return SPORTYBET_TEAMS[raw];
+  for (const part of raw.split(" ")) {
+    if (SPORTYBET_TEAMS[part]) return SPORTYBET_TEAMS[part];
+  }
+  const m = raw.match(/\b([A-Z]{3})\b/);
+  if (m && SPORTYBET_TEAMS[m[1]]) return m[1];
+  const alpha = raw.replace(/[^A-Z]/g, "");
+  return SPORTYBET_TEAMS[alpha] || (alpha.length === 3 ? alpha : "");
+}
+
+// Preprocess dark screenshot for Tesseract: inverts dark background and stretches contrast
+function preprocessImageForOCR(file) {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => {
+      try {
+        const canvas = document.createElement("canvas");
+        const ctx = canvas.getContext("2d");
+        const scale = Math.max(1, Math.min(2, 1600 / Math.max(img.width, img.height)));
+        canvas.width = Math.round(img.width * scale);
+        canvas.height = Math.round(img.height * scale);
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+
+        const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        const data = imgData.data;
+
+        // Sample brightness
+        let totalLum = 0, samples = 0;
+        for (let i = 0; i < data.length; i += 32) {
+          totalLum += 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
+          samples++;
+        }
+        const isDark = (totalLum / samples) < 128;
+
+        for (let i = 0; i < data.length; i += 4) {
+          let lum = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
+          if (isDark) lum = 255 - lum; // Invert dark to white
+          lum = lum > 155 ? 255 : (lum < 85 ? 0 : lum); // Contrast stretch
+          data[i] = lum;
+          data[i + 1] = lum;
+          data[i + 2] = lum;
+        }
+
+        ctx.putImageData(imgData, 0, 0);
+        canvas.toBlob((blob) => resolve(blob || file), "image/png");
+      } catch (e) {
+        resolve(file);
+      }
+    };
+    img.onerror = () => resolve(file);
+    img.src = URL.createObjectURL(file);
+  });
+}
+
+// ======================
+// SportyBet Ghana Instant Virtuals – Hybrid Multi-Pass OCR Parser
+// Extracts all 8+ matches accurately without skipping or odds displacement.
 // ======================
 function parseOCRText(text) {
-  const raw = text.replace(/\r/g, "\n");
-  const lines = raw.split("\n").map(l => l.trim()).filter(l => l.length > 1);
+  if (!text) return [];
 
+  // Normalize numbers: commas to dots, fix 'O'/'o' in decimals, fix leading l/I
+  let clean = text.replace(/(\d),(\d)/g, "$1.$2");
+  clean = clean.replace(/(\d)\.([0-9oOlI]{1,2})/g, (m, a, b) => {
+    const fixed = b.replace(/[oO]/g, "0").replace(/[lI]/g, "1");
+    return `${a}.${fixed.length === 1 ? fixed + "0" : fixed}`;
+  });
+  clean = clean.replace(/\b([lI])\.(\d{1,2})\b/g, "1.$2");
+  clean = clean.replace(/(\d)\s*\.\s*(\d{1,2})/g, "$1.$2");
+
+  const lines = clean.replace(/\r/g, "\n").split("\n").map(l => l.trim()).filter(l => l.length > 0);
   const matches = [];
   const seen = new Set();
 
-  // Common patterns on SportyBet mobile:
-  // "BRE vs ARS"   "TOT vs SUN"   "ESP vs JPN"   "Man Utd vs Liverpool"
-  // Odds usually appear as groups of 3 numbers: 1.85  3.40  4.10
+  function extractOdds(str) {
+    const found = [];
+    const re = /\b(\d{1,2}\.\d{1,2})\b/g;
+    let m;
+    while ((m = re.exec(str)) !== null) {
+      let num = parseFloat(m[1]);
+      if (m[1].split(".")[1].length === 1) num = parseFloat(m[1] + "0");
+      if (num >= 1.05 && num <= 20.0) {
+        found.push(num.toFixed(2));
+      }
+    }
+    return found;
+  }
 
-  const vsPatterns = [
-    // 2-5 letter codes: BRE vs ARS
-    /\b([A-Z]{2,5})\s*(?:vs|v\.?|VS|V)\s*([A-Z]{2,5})\b/g,
-    // Mixed / longer names
-    /([A-Za-z][A-Za-z0-9 .]{1,18}?)\s+(?:vs|v\.?|VS)\s+([A-Za-z][A-Za-z0-9 .]{1,18})/gi
-  ];
-
-  // Collect all "TEAM vs TEAM" occurrences with their line index
-  const foundPairs = [];
-
+  // PASS 1: Line-by-line horizontal match extraction
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
-    for (const pattern of vsPatterns) {
-      pattern.lastIndex = 0;
-      let m;
-      while ((m = pattern.exec(line)) !== null) {
-        let home = cleanTeam(m[1]);
-        let away = cleanTeam(m[2]);
-        if (home.length < 2 || away.length < 2) continue;
-        if (home === away) continue;
+    if (/(BALANCE|PAYOUT|DEPOSIT|WITHDRAW|BETSLIP|GHS|TICKET)/i.test(line)) continue;
 
-        const key = home + "|" + away;
+    const tokens = line.split(/[^a-zA-Z0-9]+/).map(cleanTeam).filter(Boolean);
+    if (tokens.length >= 2 && tokens[0] !== tokens[1]) {
+      const home = tokens[0];
+      const away = tokens[1];
+      const key = `${home}|${away}`;
+      if (!seen.has(key)) {
+        seen.add(key);
+        const context = lines.slice(i, Math.min(lines.length, i + 3)).join(" ");
+        const odds = extractOdds(context);
+        matches.push({
+          home, away,
+          odd1: odds[0] || "",
+          oddX: odds[1] || "",
+          odd2: odds[2] || ""
+        });
+        continue;
+      }
+    }
+
+    // PASS 2: Consecutive vertical lines (Home on line i, Away on line i+1 or i+2)
+    if (tokens.length === 1) {
+      const home = tokens[0];
+      for (let next = i + 1; next <= Math.min(lines.length - 1, i + 2); next++) {
+        const nextTokens = lines[next].split(/[^a-zA-Z0-9]+/).map(cleanTeam).filter(Boolean);
+        if (nextTokens.length >= 1 && nextTokens[0] !== home) {
+          const away = nextTokens[0];
+          const key = `${home}|${away}`;
+          if (!seen.has(key)) {
+            seen.add(key);
+            const context = lines.slice(next, Math.min(lines.length, next + 3)).join(" ");
+            const odds = extractOdds(context);
+            matches.push({
+              home, away,
+              odd1: odds[0] || "",
+              oddX: odds[1] || "",
+              odd2: odds[2] || ""
+            });
+            i = next;
+            break;
+          }
+        }
+      }
+    }
+  }
+
+  // PASS 3: If fewer than 4 matches found, scan all registered team tokens across the ticket
+  if (matches.length < 4) {
+    const allTokens = [];
+    for (const line of lines) {
+      if (/(BALANCE|PAYOUT|DEPOSIT|WITHDRAW|BETSLIP|GHS)/i.test(line)) continue;
+      const ws = line.split(/[^a-zA-Z0-9]+/).map(cleanTeam).filter(Boolean);
+      for (const t of ws) allTokens.push(t);
+    }
+
+    const uniquePairs = [];
+    for (let k = 0; k < allTokens.length - 1; k += 2) {
+      const h = allTokens[k];
+      const a = allTokens[k + 1];
+      if (h && a && h !== a) uniquePairs.push({ home: h, away: a });
+    }
+
+    if (uniquePairs.length > matches.length) {
+      const allDocOdds = extractOdds(clean);
+      matches.length = 0;
+      seen.clear();
+      for (let idx = 0; idx < uniquePairs.length; idx++) {
+        const p = uniquePairs[idx];
+        const key = `${p.home}|${p.away}`;
         if (seen.has(key)) continue;
         seen.add(key);
-
-        foundPairs.push({ home, away, lineIdx: i });
-      }
-    }
-  }
-
-  // Extract all plausible odds from the whole text (decimal odds 1.01 – 25)
-  const allOdds = [];
-  const oddRegex = /\b(\d{1,2}\.\d{1,2})\b/g;
-  let om;
-  while ((om = oddRegex.exec(raw)) !== null) {
-    const v = parseFloat(om[1]);
-    if (v >= 1.01 && v <= 25.0) {
-      allOdds.push(v);
-    }
-  }
-
-  // Strategy A: if we have roughly 3 × number_of_matches odds, assign sequentially
-  if (foundPairs.length > 0 && allOdds.length >= foundPairs.length * 2) {
-    // Try to group odds in threes
-    for (let i = 0; i < foundPairs.length; i++) {
-      const base = i * 3;
-      const o1 = allOdds[base];
-      const oX = allOdds[base + 1];
-      const o2 = allOdds[base + 2];
-
-      matches.push({
-        home: foundPairs[i].home,
-        away: foundPairs[i].away,
-        odd1: o1 ? o1.toFixed(2) : "",
-        oddX: oX ? oX.toFixed(2) : "",
-        odd2: o2 ? o2.toFixed(2) : ""
-      });
-    }
-  } else {
-    // Strategy B: for each pair look in nearby lines for 3 consecutive odds
-    for (const pair of foundPairs) {
-      let oddsFound = ["", "", ""];
-      const searchStart = Math.max(0, pair.lineIdx - 1);
-      const searchEnd = Math.min(lines.length - 1, pair.lineIdx + 3);
-      let localText = "";
-      for (let j = searchStart; j <= searchEnd; j++) localText += " " + lines[j];
-
-      const localOdds = [];
-      const localRegex = /\b(\d{1,2}\.\d{1,2})\b/g;
-      let lm;
-      while ((lm = localRegex.exec(localText)) !== null) {
-        const v = parseFloat(lm[1]);
-        if (v >= 1.01 && v <= 25) localOdds.push(v);
-      }
-
-      if (localOdds.length >= 3) {
-        oddsFound = [
-          localOdds[0].toFixed(2),
-          localOdds[1].toFixed(2),
-          localOdds[2].toFixed(2)
-        ];
-      }
-
-      matches.push({
-        home: pair.home,
-        away: pair.away,
-        odd1: oddsFound[0],
-        oddX: oddsFound[1],
-        odd2: oddsFound[2]
-      });
-    }
-  }
-
-  // Fallback: if still empty, try one more aggressive pass on whole text
-  if (matches.length === 0) {
-    const aggressive = raw.match(/\b([A-Z]{2,5})\s*(?:vs|v)\s*([A-Z]{2,5})\b/gi) || [];
-    aggressive.forEach(str => {
-      const parts = str.split(/\s*(?:vs|v)\s*/i);
-      if (parts.length === 2) {
+        const base = idx * 3;
         matches.push({
-          home: cleanTeam(parts[0]),
-          away: cleanTeam(parts[1]),
-          odd1: "",
-          oddX: "",
-          odd2: ""
+          home: p.home, away: p.away,
+          odd1: allDocOdds[base] || "",
+          oddX: allDocOdds[base + 1] || "",
+          odd2: allDocOdds[base + 2] || ""
         });
       }
-    });
+    }
   }
 
   return matches.slice(0, 12);
-}
-
-function cleanTeam(name) {
-  return name
-    .replace(/[^a-zA-Z0-9\s]/g, "")
-    .replace(/\s+/g, " ")
-    .trim()
-    .toUpperCase()
-    .slice(0, 18);
 }
 
 // ---------- Matches Editor ----------
@@ -923,26 +1123,60 @@ function renderMatchesEditor() {
   container.innerHTML = "";
 
   state.matches.forEach((m, idx) => {
+    const o1 = parseFloat(m.odd1);
+    const oX = parseFloat(m.oddX);
+    const o2 = parseFloat(m.odd2);
+
+    let dcHint = "";
+    if (o1 > 1 && oX > 1 && o2 > 1) {
+      const r1 = 1 / o1, rX = 1 / oX, r2 = 1 / o2;
+      const ovr = r1 + rX + r2;
+      const p1 = r1 / ovr, pX = rX / ovr, p2 = r2 / ovr;
+      const dc1X = (1 / ((p1 + pX) * 0.92)).toFixed(2);
+      const dc12 = (1 / ((p1 + p2) * 0.92)).toFixed(2);
+      const dcX2 = (1 / ((pX + p2) * 0.92)).toFixed(2);
+      dcHint = `
+        <div class="match-dc-preview">
+          <span class="dc-title">🛡️ DC:</span>
+          <span class="dc-tag">1X: ~${dc1X}</span>
+          <span class="dc-tag">12: ~${dc12}</span>
+          <span class="dc-tag">X2: ~${dcX2}</span>
+        </div>
+      `;
+    }
+
     const row = document.createElement("div");
     row.className = "match-row";
     row.innerHTML = `
-      <div class="teams">
-        <input type="text" placeholder="Home team" value="${escapeHtml(m.home)}" data-idx="${idx}" data-field="home" />
-        <span style="align-self:center;color:var(--text-muted)">vs</span>
-        <input type="text" placeholder="Away team" value="${escapeHtml(m.away)}" data-idx="${idx}" data-field="away" />
+      <div class="teams-labeled">
+        <div class="team-field">
+          <span class="role-badge role-home">🏠 HOME</span>
+          <input type="text" placeholder="CHE" maxlength="3"
+                 style="text-transform:uppercase; font-weight:800;"
+                 value="${escapeHtml(m.home)}" data-idx="${idx}" data-field="home" />
+        </div>
+        <span class="vs-label">vs</span>
+        <div class="team-field">
+          <span class="role-badge role-away">✈️ AWAY</span>
+          <input type="text" placeholder="ARS" maxlength="3"
+                 style="text-transform:uppercase; font-weight:800;"
+                 value="${escapeHtml(m.away)}" data-idx="${idx}" data-field="away" />
+        </div>
         <button class="remove-btn" data-idx="${idx}" title="Remove">×</button>
       </div>
+
       <div class="odds-row">
-        <label>1 (Home)
-          <input type="number" step="0.01" min="1" value="${m.odd1}" data-idx="${idx}" data-field="odd1" placeholder="1.80" />
+        <label>1 [Home]
+          <input type="number" step="0.01" min="1" value="${m.odd1}" data-idx="${idx}" data-field="odd1" placeholder="1.85" />
         </label>
-        <label>X (Draw)
+        <label>X [Draw]
           <input type="number" step="0.01" min="1" value="${m.oddX}" data-idx="${idx}" data-field="oddX" placeholder="3.40" />
         </label>
-        <label>2 (Away)
-          <input type="number" step="0.01" min="1" value="${m.odd2}" data-idx="${idx}" data-field="odd2" placeholder="4.20" />
+        <label>2 [Away]
+          <input type="number" step="0.01" min="1" value="${m.odd2}" data-idx="${idx}" data-field="odd2" placeholder="4.10" />
         </label>
       </div>
+      ${dcHint}
     `;
     container.appendChild(row);
   });
@@ -952,7 +1186,12 @@ function renderMatchesEditor() {
     input.addEventListener("input", e => {
       const idx = +e.target.dataset.idx;
       const field = e.target.dataset.field;
-      state.matches[idx][field] = e.target.value;
+      if (field === "home" || field === "away") {
+        e.target.value = e.target.value.toUpperCase().replace(/[^A-Z]/g, "").slice(0, 3);
+        state.matches[idx][field] = e.target.value;
+      } else {
+        state.matches[idx][field] = e.target.value;
+      }
     });
   });
 
@@ -981,19 +1220,16 @@ function escapeHtml(str) {
 }
 
 // ---------- Ranking Logic ----------
-// Value bet threshold: if fair odds > bookmaker odds, there's potential value
-const VALUE_THRESHOLD = 0.03; // 3% edge minimum to flag as value
-// Kelly fraction – use fractional Kelly (0.25) to be conservative
+const VALUE_THRESHOLD = 0.03;
 const KELLY_FRACTION = 0.25;
 
 function kellyStake(prob, odd, bankroll) {
-  // Kelly formula: f = (b*p - q) / b  where b = odd-1, p = prob, q = 1-p
   const b = odd - 1;
   const q = 1 - prob;
   const f = (b * prob - q) / b;
-  if (f <= 0) return 0; // no edge, don't bet
-  const kelly = f * KELLY_FRACTION; // fractional Kelly
-  return Math.max(0, Math.min(kelly * bankroll, bankroll * 0.15)); // cap at 15% of bankroll
+  if (f <= 0) return 0;
+  const kelly = f * KELLY_FRACTION;
+  return Math.max(0, Math.min(kelly * bankroll, bankroll * 0.15));
 }
 
 function rankBets() {
@@ -1005,7 +1241,7 @@ function rankBets() {
   });
 
   if (valid.length === 0) {
-    alert("Please enter at least one complete match with all three odds (1, X, 2).");
+    alert("Please enter at least one complete match with Home team, Away team, and all 3 odds (1, X, 2).");
     return;
   }
 
@@ -1016,59 +1252,73 @@ function rankBets() {
     const oX = parseFloat(m.oddX);
     const o2 = parseFloat(m.odd2);
 
-    // Raw implied probabilities (include bookmaker margin)
+    // Raw implied probabilities
     const raw1 = 1 / o1;
     const rawX = 1 / oX;
     const raw2 = 1 / o2;
-    const overround = raw1 + rawX + raw2; // e.g. 1.08 = 8% margin
+    const overround = raw1 + rawX + raw2;
 
-    // Fair (true) probabilities after removing overround
+    // Fair probabilities (de-margined)
     const p1 = raw1 / overround;
     const pX = rawX / overround;
     const p2 = raw2 / overround;
 
-    // Bookmaker margin per match
     const margin = ((overround - 1) / overround * 100).toFixed(1);
 
-    // Value = fair probability vs what the odds imply
-    // A value bet exists when fair prob > implied prob by threshold
-    const value1 = p1 - raw1;   // positive = value for home
+    const value1 = p1 - raw1;
     const valueX = pX - rawX;
     const value2 = p2 - raw2;
 
-    // Build outcomes with value flags
     const outcomes = [
-      { pick: "1", label: `HOME (${m.home})`, prob: p1, odd: o1, value: value1 },
-      { pick: "X", label: "DRAW",              prob: pX, odd: oX, value: valueX },
-      { pick: "2", label: `AWAY (${m.away})`,  prob: p2, odd: o2, value: value2 },
+      { pick: "1", label: `HOME WIN (${m.home})`, prob: p1, odd: o1, value: value1 },
+      { pick: "X", label: "DRAW",                  prob: pX, odd: oX, value: valueX },
+      { pick: "2", label: `AWAY WIN (${m.away})`,  prob: p2, odd: o2, value: value2 },
     ];
 
-    // Best value outcome (highest edge first, then highest prob)
     const valueBets = outcomes.filter(o => o.value >= VALUE_THRESHOLD);
     valueBets.sort((a, b) => b.value - a.value);
 
-    // Best probability outcome (safest pick)
     const byProb = [...outcomes].sort((a, b) => b.prob - a.prob);
     const bestProb = byProb[0];
 
-    // Primary pick: value bet if available, otherwise safest
     const primaryPick = valueBets.length > 0 ? valueBets[0] : bestProb;
     const isValueBet = valueBets.length > 0;
 
-    // Kelly suggested stake
     const suggestedStake = bankroll > 0
       ? kellyStake(primaryPick.prob, primaryPick.odd, bankroll)
       : null;
 
-    // Double Chance (safer combo)
-    const dc = [
-      { combo: "1X", label: "Home or Draw", prob: p1 + pX },
-      { combo: "X2", label: "Draw or Away", prob: pX + p2 },
-      { combo: "12", label: "Home or Away", prob: p1 + p2 },
-    ].sort((a, b) => b.prob - a.prob)[0];
-    const dcOddApprox = (1 / (dc.prob / overround) * 0.92).toFixed(2);
+    // All 3 Double Chance options for THIS match
+    const dc1X = {
+      combo: "1X",
+      label: `${m.home} or Draw (Home/Draw)`,
+      prob: p1 + pX,
+      odd: (1 / ((p1 + pX) * 0.92)).toFixed(2)
+    };
+    const dc12 = {
+      combo: "12",
+      label: `${m.home} or ${m.away} (Home/Away)`,
+      prob: p1 + p2,
+      odd: (1 / ((p1 + p2) * 0.92)).toFixed(2)
+    };
+    const dcX2 = {
+      combo: "X2",
+      label: `Draw or ${m.away} (Draw/Away)`,
+      prob: pX + p2,
+      odd: (1 / ((pX + p2) * 0.92)).toFixed(2)
+    };
 
-    // Sort score: value bets ranked higher, then by edge size
+    const dcOptions = [dc1X, dc12, dcX2].sort((a, b) => b.prob - a.prob);
+    const bestDc = dcOptions[0];
+
+    // Estimated expected goals
+    const lambda_h = Math.max(0.6, Math.min(3.0, 1.4 + (p1 - p2) * 1.5));
+    const lambda_a = Math.max(0.6, Math.min(3.0, 1.2 + (p2 - p1) * 1.5));
+    const total_l = lambda_h + lambda_a;
+    const probUnder25 = Math.exp(-total_l) * (1 + total_l + (total_l * total_l) / 2);
+    const probOver25 = 1 - probUnder25;
+    const probBtts = (1 - Math.exp(-lambda_h)) * (1 - Math.exp(-lambda_a));
+
     const score = (isValueBet ? 100 : 0) + primaryPick.value * 200 + primaryPick.prob * 10;
 
     return {
@@ -1080,15 +1330,14 @@ function rankBets() {
       isValueBet,
       valueBets,
       suggestedStake,
-      dc,
-      dcOddApprox,
+      dc1X, dc12, dcX2,
+      bestDc,
+      probOver25, probUnder25, probBtts,
       score
     };
   });
 
-  // Sort: value bets first, then by edge
   ranked.sort((a, b) => b.score - a.score);
-
   renderRecommendations(ranked);
 }
 
@@ -1099,34 +1348,30 @@ function renderRecommendations(ranked) {
   const bankroll = state.bankroll || 0;
   const hasValueBets = ranked.some(m => m.isValueBet);
 
-  // --- Summary notice ---
+  // Summary notice
   const notice = document.createElement("div");
   notice.className = "rec-notice";
   if (hasValueBets) {
     notice.innerHTML = `<strong>Value bets detected</strong> — odds appear generous vs fair probability. Ranked by edge size.`;
     notice.classList.add("value-notice");
   } else {
-    notice.innerHTML = `No clear value bets found. Showing <strong>best odds probability</strong> only. These are RNG virtuals — bet small.`;
+    notice.innerHTML = `Showing <strong>best odds & probability</strong> for all matches. Notice both 1X2 and Double Chance options are displayed for every match.`;
     notice.classList.add("info-notice");
   }
   container.appendChild(notice);
 
-  // --- Top picks (max 4) ---
-  const top = ranked.slice(0, 4);
-
-  top.forEach((m, i) => {
+  ranked.forEach((m, i) => {
     const pick = m.primaryPick;
     const probPct = Math.round(pick.prob * 100);
     const edgePct = (pick.value * 100).toFixed(1);
     const isValue = m.isValueBet;
 
-    // Stake line
     let stakeLine = "";
     if (bankroll > 0 && m.suggestedStake > 0.01) {
       stakeLine = `
         <div class="kelly-stake">
           Suggested stake: <strong>GHS ${m.suggestedStake.toFixed(2)}</strong>
-          <span class="kelly-note">(¼ Kelly of GHS ${bankroll.toFixed(2)} bankroll)</span>
+          <span class="kelly-note">(¼ Kelly on GHS ${bankroll.toFixed(2)} bankroll)</span>
         </div>`;
     } else if (bankroll === 0) {
       stakeLine = `<div class="kelly-stake kelly-no-bankroll">Set your bankroll to get a suggested stake</div>`;
@@ -1138,27 +1383,81 @@ function renderRecommendations(ranked) {
     card.className = `rec-card${isValue ? " value" : ""}`;
     card.innerHTML = `
       ${isValue ? `<span class="value-badge">VALUE BET</span>` : `<span class="rank">#${i + 1}</span>`}
-      <div class="match-name">${escapeHtml(m.home)} vs ${escapeHtml(m.away)}</div>
-      <div class="pick-label">Best pick: <span class="pick-text">${escapeHtml(pick.label)}</span></div>
+
+      <!-- Distinct Home vs Away designation -->
+      <div class="match-teams-header">
+        <div class="team-badge-chip home-chip"><span class="chip-sub">HOME</span> <strong>${escapeHtml(m.home)}</strong></div>
+        <span class="vs-badge">VS</span>
+        <div class="team-badge-chip away-chip"><span class="chip-sub">AWAY</span> <strong>${escapeHtml(m.away)}</strong></div>
+      </div>
+
+      <!-- Primary 1X2 Pick -->
+      <div class="ai-pick-row">
+        <div class="ai-pick-main">
+          <span class="pick-label-sm">Primary 1X2 Recommendation</span>
+          <span class="pick-text ${isValue ? 'pick-value' : ''}">🎯 ${escapeHtml(pick.label)}</span>
+          <span class="pick-odd">@ ${pick.odd}</span>
+        </div>
+        <span class="confidence-badge ${isValue ? 'tier-high' : 'tier-medium'}">${probPct}% Fair Prob</span>
+      </div>
+
+      <!-- Double Chance for THIS match -->
+      <div class="dc-match-section">
+        <div class="dc-section-header">
+          <span>🛡️ Double Chance (DC) Markets</span>
+          <span class="dc-best-badge">Safest: <strong>${m.bestDc.combo}</strong> (~${m.bestDc.odd})</span>
+        </div>
+        <div class="dc-options-grid">
+          <div class="dc-pill ${m.bestDc.combo === '1X' ? 'dc-recommended' : ''}">
+            <span class="dc-name">1X: ${escapeHtml(m.home)} or Draw</span>
+            <span class="dc-stats">${Math.round(m.dc1X.prob * 100)}% • ~${m.dc1X.odd}</span>
+          </div>
+          <div class="dc-pill ${m.bestDc.combo === '12' ? 'dc-recommended' : ''}">
+            <span class="dc-name">12: ${escapeHtml(m.home)} or ${escapeHtml(m.away)}</span>
+            <span class="dc-stats">${Math.round(m.dc12.prob * 100)}% • ~${m.dc12.odd}</span>
+          </div>
+          <div class="dc-pill ${m.bestDc.combo === 'X2' ? 'dc-recommended' : ''}">
+            <span class="dc-name">X2: Draw or ${escapeHtml(m.away)}</span>
+            <span class="dc-stats">${Math.round(m.dcX2.prob * 100)}% • ~${m.dcX2.odd}</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Goals / Over-Under Market Preview -->
+      <div class="market-pills" style="margin: 12px 0 8px 0;">
+        <div class="market-pill ${m.probOver25 >= 0.55 ? 'pill-value' : ''}">
+          <span class="pill-label">Over 2.5</span>
+          <span class="pill-prob">${Math.round(m.probOver25 * 100)}%</span>
+        </div>
+        <div class="market-pill ${m.probUnder25 >= 0.55 ? 'pill-value' : ''}">
+          <span class="pill-label">Under 2.5</span>
+          <span class="pill-prob">${Math.round(m.probUnder25 * 100)}%</span>
+        </div>
+        <div class="market-pill ${m.probBtts >= 0.55 ? 'pill-value' : ''}">
+          <span class="pill-label">BTTS Yes</span>
+          <span class="pill-prob">${Math.round(m.probBtts * 100)}%</span>
+        </div>
+      </div>
+
       <div class="meta">
         <span>Odds: <strong>${pick.odd}</strong></span>
         <span>Fair prob: <strong>${probPct}%</strong></span>
         <span class="${isValue ? "edge-positive" : "edge-neutral"}">Edge: <strong>${edgePct}%</strong></span>
       </div>
-      <div class="margin-note">Bookmaker margin on this match: ${m.margin}%</div>
+
       <div class="odds-bar-wrap">
         <div class="odds-bar-row">
-          <span>1</span>
+          <span>1 (${escapeHtml(m.home)})</span>
           <div class="odds-bar"><div class="odds-fill home-fill" style="width:${Math.round(m.p1*100)}%"></div></div>
           <span>${Math.round(m.p1*100)}%</span>
         </div>
         <div class="odds-bar-row">
-          <span>X</span>
+          <span>X (Draw)</span>
           <div class="odds-bar"><div class="odds-fill draw-fill" style="width:${Math.round(m.pX*100)}%"></div></div>
           <span>${Math.round(m.pX*100)}%</span>
         </div>
         <div class="odds-bar-row">
-          <span>2</span>
+          <span>2 (${escapeHtml(m.away)})</span>
           <div class="odds-bar"><div class="odds-fill away-fill" style="width:${Math.round(m.p2*100)}%"></div></div>
           <span>${Math.round(m.p2*100)}%</span>
         </div>
@@ -1168,32 +1467,10 @@ function renderRecommendations(ranked) {
     container.appendChild(card);
   });
 
-  // --- Safest Double Chance ---
-  const safest = [...ranked].sort((a, b) => b.dc.prob - a.dc.prob)[0];
-  if (safest) {
-    const dcProbPct = Math.round(safest.dc.prob * 100);
-    const card = document.createElement("div");
-    card.className = "rec-card safe";
-    card.innerHTML = `
-      <span class="rank safe-rank">SAFE</span>
-      <div class="match-name">${escapeHtml(safest.home)} vs ${escapeHtml(safest.away)}</div>
-      <div class="pick-label">Double Chance: <span class="pick-text gold">${safest.dc.combo} — ${safest.dc.label}</span></div>
-      <div class="meta">
-        <span>Est. Odds: <strong>~${safest.dcOddApprox}</strong></span>
-        <span>Coverage: <strong>${dcProbPct}%</strong></span>
-      </div>
-      <div class="margin-note">Lower payout, higher coverage. Good for small stakes.</div>
-      <div class="confidence-bar">
-        <div class="confidence-fill" style="width:${dcProbPct}%;background:var(--gold)"></div>
-      </div>
-    `;
-    container.appendChild(card);
-  }
-
-  // --- RNG disclaimer ---
+  // RNG disclaimer
   const disclaimer = document.createElement("div");
   disclaimer.className = "rec-disclaimer";
-  disclaimer.innerHTML = `Instant Virtuals are RNG-based. No system guarantees a win. This tool shows odds value only — not real predictions. Always gamble within your means.`;
+  disclaimer.innerHTML = `Instant Virtuals are RNG-based. No system guarantees a win. This tool shows odds value & double chance coverage only — not guarantees. Always gamble within your means.`;
   container.appendChild(disclaimer);
 
   document.getElementById("recommendations").classList.remove("hidden");
