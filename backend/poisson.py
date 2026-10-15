@@ -160,6 +160,25 @@ def solve_lambdas(
 # ──────────────────────────────────────────────────────────────────
 # Step 4c: Derived markets
 # ──────────────────────────────────────────────────────────────────
+def over_under_lines(mat: List[List[float]]) -> Dict[str, Tuple[float, float]]:
+    """Returns (P_over, P_under) for lines 0.5, 1.5, 2.5, 3.5."""
+    n = len(mat) - 1
+    p_o05, p_o15, p_o25, p_o35 = 0.0, 0.0, 0.0, 0.0
+    for h in range(n + 1):
+        for a in range(n + 1):
+            tot = h + a
+            if tot > 0: p_o05 += mat[h][a]
+            if tot > 1: p_o15 += mat[h][a]
+            if tot > 2: p_o25 += mat[h][a]
+            if tot > 3: p_o35 += mat[h][a]
+    return {
+        "0.5": (round(p_o05, 4), round(max(0.0, 1.0 - p_o05), 4)),
+        "1.5": (round(p_o15, 4), round(max(0.0, 1.0 - p_o15), 4)),
+        "2.5": (round(p_o25, 4), round(max(0.0, 1.0 - p_o25), 4)),
+        "3.5": (round(p_o35, 4), round(max(0.0, 1.0 - p_o35), 4)),
+    }
+
+
 def over_under_25(mat: List[List[float]]) -> Tuple[float, float]:
     """Returns (P_over_2.5, P_under_2.5)."""
     p_over = 0.0
@@ -277,6 +296,7 @@ def analyse_match(o1: float, oX: float, o2: float) -> Dict:
 
     # 4. Markets
     p_over, p_under   = over_under_25(mat)
+    ou_lines          = over_under_lines(mat)
     p_btts,  p_nobtts = btts(mat)
     top_cs            = top_correct_scores(mat, top_n=3)
     ah                = asian_handicap(mat)
@@ -300,13 +320,15 @@ def analyse_match(o1: float, oX: float, o2: float) -> Dict:
         "overround_pct": round(overround_pct, 2),
 
         # Poisson parameters
-        "lambda_home":   lh,
-        "lambda_away":   la,
+        "lambda_home":    lh,
+        "lambda_away":    la,
+        "expected_goals": round(lh + la, 2),
 
         # Over/Under
         "over25_prob":   p_over,
         "under25_prob":  p_under,
         "over25_edge":   ou_edge,
+        "ou_lines":      ou_lines,
 
         # BTTS
         "btts_prob":     p_btts,

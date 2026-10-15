@@ -115,9 +115,10 @@ class Match(BaseModel):
 
 
 class OCRResponse(BaseModel):
-    matches:  List[Match]
-    engine:   str
-    raw_text: Optional[str] = None
+    matches:       List[Match]
+    engine:        str
+    active_market: str = "1X2"
+    raw_text:      Optional[str] = None
 
 
 class MatchInput(BaseModel):
@@ -258,6 +259,31 @@ SPORTYBET_TEAMS = {
     "TOTTENHAM": "TOT", "SPURS": "TOT", "TOT": "TOT",
     "WEST HAM": "WHU", "WEST HAM UNITED": "WHU", "WHU": "WHU",
     "WOLVES": "WOL", "WOLVERHAMPTON": "WOL", "WOL": "WOL",
+    # English Championship / Instant Football additions
+    "COVENTRY": "COV", "COVENTRY CITY": "COV", "COV": "COV",
+    "SUNDERLAND": "SUN", "SUN": "SUN",
+    "LEEDS": "LEE", "LEEDS UNITED": "LEE", "LEE": "LEE",
+    "HULL": "HUL", "HULL CITY": "HUL", "HUL": "HUL",
+    "SHEFFIELD UNITED": "SHU", "SHU": "SHU",
+    "SHEFFIELD WEDNESDAY": "SHW", "SHW": "SHW",
+    "BURNLEY": "BUR", "BUR": "BUR",
+    "LUTON": "LUT", "LUTON TOWN": "LUT", "LUT": "LUT",
+    "NORWICH": "NOR", "NORWICH CITY": "NOR", "NOR": "NOR",
+    "WATFORD": "WAT", "WAT": "WAT",
+    "WEST BROM": "WBA", "WBA": "WBA",
+    "STOKE": "STK", "STOKE CITY": "STK", "STK": "STK",
+    "MIDDLESBROUGH": "MID", "MID": "MID",
+    "BLACKBURN": "BLB", "BLB": "BLB",
+    "QPR": "QPR",
+    "MILLWALL": "MIL",
+    "PRESTON": "PNE", "PNE": "PNE",
+    "SWANSEA": "SWA", "SWA": "SWA",
+    "CARDIFF": "CAR", "CAR": "CAR",
+    "BRISTOL CITY": "BRC", "BRC": "BRC",
+    "DERBY": "DER", "DERBY COUNTY": "DER", "DER": "DER",
+    "OXFORD": "OXF", "OXF": "OXF",
+    "PLYMOUTH": "PLY", "PLY": "PLY",
+    "PORTSMOUTH": "POR", "POR": "POR",
 
     # La Liga / Spain
     "REAL MADRID": "RMA", "RMA": "RMA",
@@ -287,6 +313,12 @@ SPORTYBET_TEAMS = {
     "LEIPZIG": "RBL", "RB LEIPZIG": "RBL", "RBL": "RBL",
 }
 
+NON_TEAM_WORDS = {
+    "ENG", "SPA", "GER", "ITA", "CHA", "GHS", "INS", "FOO", "TBA", "TAB",
+    "ROU", "NEX", "BET", "SLI", "ALL", "LEA", "GUE", "MIN", "SEC", "HAL",
+    "YES", "NOO", "DRA", "AWY", "HOM"
+}
+
 def clean_team(name: str) -> str:
     """Normalize team names strictly to 3 uppercase letters (e.g. CHE, ARS)."""
     raw = re.sub(r"[^a-zA-Z0-9\s]", "", str(name or "")).strip().upper()
@@ -298,13 +330,15 @@ def clean_team(name: str) -> str:
     for word in raw.split():
         if word in SPORTYBET_TEAMS:
             return SPORTYBET_TEAMS[word]
-    # If 3 capital letters, return them
+    # If 3 capital letters, check against non-team words
     m = re.search(r"\b([A-Z]{3})\b", raw)
-    if m:
+    if m and m.group(1) not in NON_TEAM_WORDS:
         return m.group(1)
-    # Default to first 3 letters
+    # Default to first 3 letters if valid alpha
     clean_alpha = re.sub(r"[^A-Z]", "", raw)
-    return clean_alpha[:3] if len(clean_alpha) >= 3 else clean_alpha
+    if len(clean_alpha) == 3 and clean_alpha not in NON_TEAM_WORDS:
+        return clean_alpha
+    return ""
 
 
 def safe_float(val: str) -> float:
@@ -332,12 +366,14 @@ def parse_sportybet_text(text: str) -> List[dict]:
     """Line-by-line parser for SportyBet Instant Virtuals.
     Extracts 3-letter uppercase team pairs and pairs them directly with adjacent odds.
     Never uses global sequential odds chunking to avoid value displacement."""
-    lines = [l.strip() for l in text.replace("\r", "\n").split("\n") if len(l.strip()) > 1]
+    # Normalize comma decimals (2,25 -> 2.25)
+    normalized = re.sub(r"(\d),(\d)", r"\1.\2", text or "")
+    lines = [l.strip() for l in normalized.replace("\r", "\n").split("\n") if len(l.strip()) > 1]
     matches = []
     seen = set()
 
     # Regex for 3-letter codes: CHE vs ARS, CHE - ARS, CHE / ARS, CHE v ARS, or CHE ARS
-    vs_re = re.compile(r"\b([A-Z]{3})\s*(?:vs|v\.?|VS|V|\-|\/|@)?\s*([A-Z]{3})\b")
+    vs_re = re.compile(r"\b([A-Za-z]{3})\s*(?:vs|v\.?|VS|V|\-|\/|@)?\s*([A-Za-z]{3})\b")
 
     for i, line in enumerate(lines):
         # Ignore lines with obvious non-odds content
@@ -347,9 +383,9 @@ def parse_sportybet_text(text: str) -> List[dict]:
         m = vs_re.search(line)
         if not m and i + 1 < len(lines):
             # Check if home is on this line and away is on next line
-            h_m = re.search(r"\b([A-Z]{3})\b", line)
-            a_m = re.search(r"\b([A-Z]{3})\b", lines[i + 1])
-            if h_m and a_m and h_m.group(1) != a_m.group(1):
+            h_m = re.search(r"\b([A-Za-z]{3})\b", line)
+            a_m = re.search(r"\b([A-Za-z]{3})\b", lines[i + 1])
+            if h_m and a_m and h_m.group(1).upper() != a_m.group(1).upper():
                 home = clean_team(h_m.group(1))
                 away = clean_team(a_m.group(1))
                 if len(home) == 3 and len(away) == 3 and home != away:
@@ -357,7 +393,7 @@ def parse_sportybet_text(text: str) -> List[dict]:
                     if key not in seen:
                         seen.add(key)
                         # Extract odds from surrounding lines (i-1 to i+3)
-                        context_lines = " ".join(lines[max(0, i - 1):min(len(lines), i + 4)])
+                        context_lines = " ".join(lines[max(0, i - 1):min(len(lines), i + 4)]).replace(",", ".")
                         odds = [float(x) for x in re.findall(r"\b(\d{1,2}\.\d{2})\b", context_lines)
                                 if 1.05 <= float(x) <= 25.0]
                         o1 = f"{odds[0]:.2f}" if len(odds) > 0 else ""
@@ -369,15 +405,15 @@ def parse_sportybet_text(text: str) -> List[dict]:
         if m:
             home = clean_team(m.group(1))
             away = clean_team(m.group(2))
-            if len(home) < 2 or len(away) < 2 or home == away:
+            if len(home) != 3 or len(away) != 3 or home == away:
                 continue
             key = f"{home}|{away}"
             if key in seen:
                 continue
             seen.add(key)
 
-            # Look for 3 odds on this same line or next line
-            context = line + " " + (lines[i + 1] if i + 1 < len(lines) else "")
+            # Look for 3 odds on this same line or next 2 lines
+            context = " ".join(lines[i:min(len(lines), i + 3)]).replace(",", ".")
             odds = [float(x) for x in re.findall(r"\b(\d{1,2}\.\d{2})\b", context)
                     if 1.05 <= float(x) <= 25.0]
             o1 = f"{odds[0]:.2f}" if len(odds) > 0 else ""
@@ -391,36 +427,53 @@ def parse_sportybet_text(text: str) -> List[dict]:
 # ──────────────────────────────────────────────────────────────────
 # OCR engines
 # ──────────────────────────────────────────────────────────────────
-OCR_PROMPT = """You are a specialist OCR agent for SportyBet Ghana Instant Virtuals betting slips and match screens.
+OCR_PROMPT = """You are a specialist OCR agent for SportyBet Ghana Instant Virtuals betting screens and match slips.
 
 CRITICAL RULES & DATA FORMAT:
-1. TEAM NAMES:
-   - Every team is identified strictly by a 3-CAPITAL-LETTER code!
-   - Examples: Chelsea = CHE, Arsenal = ARS, Manchester City = MCI, Manchester United = MUN,
-     Liverpool = LIV, Tottenham = TOT, Newcastle = NEW, Aston Villa = AVL, Brentford = BRE,
-     Brighton = BHA, Crystal Palace = CRY, Everton = EVE, Fulham = FUL, Ipswich = IPS,
-     Leicester = LEI, Nottingham Forest = NFO, Southampton = SOU, West Ham = WHU, Wolves = WOL.
-   - Always return team codes as exact 3 UPPERCASE letters.
 
-2. MATCH FORMAT & HOME / AWAY:
-   - The FIRST team listed is ALWAYS the HOME team (playing at home).
-   - The SECOND team listed is ALWAYS the AWAY team (playing away).
-   - Example: "CHE vs ARS" -> home="CHE", away="ARS"
+1. ACTIVE MARKET TAB DETECTION:
+   - Notice the horizontal row of market tabs directly above the column headers:
+     * "1X2" (columns: 1=Home Win, X=Draw, 2=Away Win)
+     * "1X2 - 1UP" or "1X2 - 2UP" (early payout 1X2)
+     * "O/U" or "Overs/Unders" (Over / Under goals, e.g. 1.5, 2.5)
+     * "Double Chance" or "DC" (columns: 1X, 12, X2)
+     * "GG/NG" or "Goal Goal / No Goal" (Both Teams To Score: Yes/No)
+     * "1Half 1X2"
+   - Look for the green underline or green highlighted tab to see which market is selected.
+   - Return "active_market": "1X2" | "O/U" | "DC" | "GG/NG" | "1HALF_1X2". If unsure, default to "1X2".
 
-3. ODDS EXTRACTION:
-   - Extract the 3 decimal odds in exact order:
-     * odd1: Home Win (1)
-     * oddX: Draw (X)
-     * odd2: Away Win (2)
-   - Decimal odds are between 1.05 and 25.00 (e.g., 1.85, 3.40, 4.10).
-   - NEVER confuse odds with clock times (like 14:30), round numbers (Round 15), or account balances (GHS 50.00).
-   - Do NOT shift or guess odds: each match row must receive ONLY its own odds.
+2. TEAM NAMES (STRICT 3 CAPITAL LETTERS):
+   - Every team is identified strictly by a 3-LETTER UPPERCASE code!
+   - Examples from English Virtuals:
+     CRY (Crystal Palace), COV (Coventry), BHA (Brighton), SUN (Sunderland),
+     MCI (Man City), IPS (Ipswich), LIV (Liverpool), NEW (Newcastle),
+     AST (Aston Villa), TOT (Tottenham), FUL (Fulham), ARS (Arsenal),
+     CHE (Chelsea), MUN (Man United), EVE (Everton), LEE (Leeds),
+     HUL (Hull), BOU (Bournemouth), BRE (Brentford), WOL (Wolves),
+     WHU (West Ham), SOU (Southampton), LEI (Leicester), NFO (Nottingham Forest).
+   - The FIRST team is ALWAYS HOME (left side).
+   - The SECOND team is ALWAYS AWAY (right side).
+   - Example: "CRY vs COV" -> home="CRY", away="COV"
 
-Return ONLY a valid JSON array. Zero markdown, zero explanation.
+3. ODDS EXTRACTION (GREEN NUMBERS IN HORIZONTAL ROWS):
+   - Each match row has 3 green odds numbers inside dark buttons.
+   - SportyBet uses commas for decimals (e.g. "2,25", "3,63", "3,03").
+   - You MUST convert all commas to standard decimal points (e.g. "2.25", "3.63", "3.03").
+   - Extract ALL matches visible on screen (typically 8 to 10 matches).
+   - In 1X2 market:
+     * odd1: column 1 (Home Win)
+     * oddX: column 2 (Draw)
+     * odd2: column 3 (Away Win)
+
+Return ONLY a valid JSON object. Zero markdown, zero extra text.
 Format:
-[
-  {"home": "CHE", "away": "ARS", "odd1": "1.85", "oddX": "3.40", "odd2": "4.10", "match_num": 1}
-]
+{
+  "active_market": "1X2",
+  "matches": [
+    {"home": "CRY", "away": "COV", "odd1": "2.25", "oddX": "3.63", "odd2": "3.03"},
+    {"home": "BHA", "away": "SUN", "odd1": "1.91", "oddX": "3.67", "odd2": "3.93"}
+  ]
+}
 """
 
 
@@ -461,12 +514,12 @@ def _validate_ocr(data: list) -> list:
     return cleaned
 
 
-async def _ocr_gemini(image_bytes: bytes, api_key: Optional[str] = None) -> tuple[list, str]:
+async def _ocr_gemini(image_bytes: bytes, api_key: Optional[str] = None) -> tuple[list, str, str]:
     import google.generativeai as genai
     import PIL.Image
     key = api_key or os.getenv("GOOGLE_AI_STUDIO_KEY") or os.getenv("GEMINI_API_KEY")
     if not key:
-        return [], ""
+        return [], "", "1X2"
     genai.configure(api_key=key)
     img = PIL.Image.open(io.BytesIO(image_bytes))
     content = ""
@@ -481,19 +534,28 @@ async def _ocr_gemini(image_bytes: bytes, api_key: Optional[str] = None) -> tupl
         except Exception as e:
             print(f"{model_name} OCR failed: {e}")
     if not content:
-        return [], ""
+        return [], "", "1X2"
     content = re.sub(r"^```(?:json)?\s*", "", content, flags=re.MULTILINE)
     content = re.sub(r"\s*```$",           "", content, flags=re.MULTILINE).strip()
-    m = re.search(r"\[.*\]", content, re.DOTALL)
-    if m:
-        content = m.group(0)
+    active_market = "1X2"
     try:
-        return _validate_ocr(json.loads(content)), content
+        parsed = json.loads(content)
+        if isinstance(parsed, dict):
+            active_market = parsed.get("active_market", "1X2")
+            return _validate_ocr(parsed.get("matches", [])), content, active_market
+        elif isinstance(parsed, list):
+            return _validate_ocr(parsed), content, "1X2"
     except Exception:
-        return parse_sportybet_text(content), content
+        m = re.search(r"\[.*\]", content, re.DOTALL)
+        if m:
+            try:
+                return _validate_ocr(json.loads(m.group(0))), content, "1X2"
+            except Exception:
+                pass
+        return parse_sportybet_text(content), content, "1X2"
 
 
-async def _ocr_openai(image_bytes: bytes) -> tuple[list, str]:
+async def _ocr_openai(image_bytes: bytes) -> tuple[list, str, str]:
     from openai import OpenAI
     client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
     b64    = base64.b64encode(image_bytes).decode("utf-8")
@@ -511,14 +573,15 @@ async def _ocr_openai(image_bytes: bytes) -> tuple[list, str]:
     content = re.sub(r"\s*```$",     "", content)
     try:
         data = json.loads(content)
-        return [{
+        matches = [{
             "home": clean_team(str(i.get("home", ""))),
             "away": clean_team(str(i.get("away", ""))),
             "odd1": str(i.get("odd1", "")), "oddX": str(i.get("oddX", "")),
             "odd2": str(i.get("odd2", "")),
-        } for i in data], content
+        } for i in data]
+        return matches, content, "1X2"
     except Exception:
-        return parse_sportybet_text(content), content
+        return parse_sportybet_text(content), content, "1X2"
 
 
 # ──────────────────────────────────────────────────────────────────
@@ -534,7 +597,7 @@ The odds encode the bookmaker's Poisson probability model. Your job:
 Rules: no negative Kelly picks; confidence 50-65=low, 66-79=medium, 80+=high."""
 
 
-async def _run_ai_prediction(matches: List[dict], feedback: List[dict]) -> dict:
+async def _run_ai_prediction(matches: List[dict], feedback: List[dict], api_key: Optional[str] = None) -> dict:
     # Try Groq first, fall back to Gemini
     groq_key = os.getenv("GROQ_API_KEY")
     if groq_key:
@@ -545,10 +608,10 @@ async def _run_ai_prediction(matches: List[dict], feedback: List[dict]) -> dict:
 
     # Fallback to Gemini
     import google.generativeai as genai
-    api_key = os.getenv("GOOGLE_AI_STUDIO_KEY") or os.getenv("GEMINI_API_KEY")
-    if not api_key:
+    gem_key = api_key or os.getenv("GOOGLE_AI_STUDIO_KEY") or os.getenv("GEMINI_API_KEY")
+    if not gem_key:
         raise RuntimeError("No AI key configured — set GROQ_API_KEY or GOOGLE_AI_STUDIO_KEY")
-    genai.configure(api_key=api_key)
+    genai.configure(api_key=gem_key)
 
     block = "".join(
         f"Match {i}: {m['home']} vs {m['away']} | "
@@ -829,7 +892,7 @@ async def ocr_endpoint(image: UploadFile = File(...), request: Request = None):
     if len(image_bytes) > 8 * 1024 * 1024:
         raise HTTPException(400, "Image too large (max 8 MB)")
 
-    engine, matches, raw_text = "none", [], None
+    engine, matches, raw_text, active_market = "none", [], None, "1X2"
 
     gemini_key = None
     if request:
@@ -839,7 +902,7 @@ async def ocr_endpoint(image: UploadFile = File(...), request: Request = None):
 
     if gemini_key:
         try:
-            matches, raw_text = await _ocr_gemini(image_bytes, gemini_key)
+            matches, raw_text, active_market = await _ocr_gemini(image_bytes, gemini_key)
             if matches:
                 engine = "gemini-vision"
         except Exception as e:
@@ -847,7 +910,7 @@ async def ocr_endpoint(image: UploadFile = File(...), request: Request = None):
 
     if not matches and os.getenv("OPENAI_API_KEY"):
         try:
-            matches, raw_text = await _ocr_openai(image_bytes)
+            matches, raw_text, active_market = await _ocr_openai(image_bytes)
             if matches:
                 engine = "openai-gpt4o-mini"
         except Exception as e:
@@ -857,7 +920,7 @@ async def ocr_endpoint(image: UploadFile = File(...), request: Request = None):
         engine = "fallback-empty"
 
     return OCRResponse(matches=[Match(**m) for m in matches],
-                       engine=engine, raw_text=raw_text)
+                       engine=engine, active_market=active_market, raw_text=raw_text)
 
 
 # ──────────────────────────────────────────────────────────────────

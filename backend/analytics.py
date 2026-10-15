@@ -152,6 +152,89 @@ def _reasoning(pick: str, edge: float, fair_prob: float, odd: float,
     )
 
 
+def _build_ou_market(pa: dict, home: str, away: str) -> dict:
+    """Build detailed Over/Under predictions across 1.5, 2.5, 3.5 with plain-language explanations."""
+    lines_data = pa.get("ou_lines", {})
+    o15, u15 = lines_data.get("1.5", (min(0.98, pa.get("over25_prob", 0.5) * 1.3), 0.2))
+    o25, u25 = lines_data.get("2.5", (pa.get("over25_prob", 0.5), pa.get("under25_prob", 0.5)))
+    o35, u35 = lines_data.get("3.5", (max(0.05, pa.get("over25_prob", 0.5) * 0.65), 0.65))
+
+    o15 = min(0.98, max(0.02, o15))
+    u15 = round(1.0 - o15, 4)
+    o25 = min(0.95, max(0.05, o25))
+    u25 = round(1.0 - o25, 4)
+    o35 = min(0.90, max(0.02, o35))
+    u35 = round(1.0 - o35, 4)
+
+    xg = pa.get("expected_goals", round(pa.get("lambda_home", 1.3) + pa.get("lambda_away", 1.1), 2))
+
+    if xg >= 2.70 and o15 >= 0.75:
+        if o25 >= 0.58:
+            rec_pick = "O 2.5"
+            rec_label = "Over 2.5 Goals (O 2.5)"
+            rec_prob = o25
+            rec_expl = "O 2.5 means the match will record 3 or more goals at the end."
+        else:
+            rec_pick = "O 1.5"
+            rec_label = "Over 1.5 Goals (O 1.5)"
+            rec_prob = o15
+            rec_expl = "O 1.5 means the match will record 2 or more goals at the end (High Probability)."
+    elif xg <= 2.20:
+        if u25 >= 0.56:
+            rec_pick = "U 2.5"
+            rec_label = "Under 2.5 Goals (U 2.5)"
+            rec_prob = u25
+            rec_expl = "U 2.5 means the match will record 2 or fewer goals total (0, 1, or 2 goals)."
+        else:
+            rec_pick = "U 3.5"
+            rec_label = "Under 3.5 Goals (U 3.5)"
+            rec_prob = u35
+            rec_expl = "U 3.5 means the match will record 3 or fewer goals at the end."
+    elif o15 >= 0.70:
+        rec_pick = "O 1.5"
+        rec_label = "Over 1.5 Goals (O 1.5)"
+        rec_prob = o15
+        rec_expl = "O 1.5 means the match will record 2 or more goals at the end."
+    else:
+        rec_pick = "U 3.5"
+        rec_label = "Under 3.5 Goals (U 3.5)"
+        rec_prob = u35
+        rec_expl = "U 3.5 means the match will record 3 or fewer goals at the end."
+
+    rec_odd = round(1.0 / (rec_prob * 0.92), 2)
+
+    return {
+        "recommended": {
+            "pick": rec_pick,
+            "label": rec_label,
+            "prob": round(rec_prob, 4),
+            "odd": f"{rec_odd:.2f}",
+            "explanation": rec_expl,
+            "expected_goals": xg,
+        },
+        "lines": {
+            "1.5": {
+                "over_prob": round(o15, 4), "under_prob": round(u15, 4),
+                "over_odd": f"{round(1.0/(o15*0.92), 2):.2f}", "under_odd": f"{round(1.0/(u15*0.92), 2):.2f}",
+                "over_desc": "2 or more goals total (e.g. 1-1, 2-0, 2-1)",
+                "under_desc": "0 or 1 goal total (e.g. 0-0, 1-0, 0-1)"
+            },
+            "2.5": {
+                "over_prob": round(o25, 4), "under_prob": round(u25, 4),
+                "over_odd": f"{round(1.0/(o25*0.92), 2):.2f}", "under_odd": f"{round(1.0/(u25*0.92), 2):.2f}",
+                "over_desc": "3 or more goals total (e.g. 2-1, 2-2, 3-0)",
+                "under_desc": "2 or fewer goals total (e.g. 0-0, 1-0, 1-1)"
+            },
+            "3.5": {
+                "over_prob": round(o35, 4), "under_prob": round(u35, 4),
+                "over_odd": f"{round(1.0/(o35*0.92), 2):.2f}", "under_odd": f"{round(1.0/(u35*0.92), 2):.2f}",
+                "over_desc": "4 or more goals total (e.g. 3-1, 2-2, 3-2)",
+                "under_desc": "3 or fewer goals total (e.g. 1-1, 2-1, 2-0)"
+            }
+        }
+    }
+
+
 def _ou25_pick(over_prob: float, under_prob: float,
                over_edge: float, under_edge: float) -> dict:
     """Return the better-value Over/Under 2.5 pick."""
@@ -327,12 +410,15 @@ def run_analytics(matches: List[dict], bankroll: float = 0.0) -> dict:
                                 over_edge, under_edge)
         btts_p    = _btts_pick(pa["btts_prob"], pa["no_btts_prob"],
                                 btts_edge, nobt_edge)
+        ou_detail = _build_ou_market(pa, home, away)
 
         markets = {
             "over25":          ou_pick,
             "btts":            btts_p,
+            "ou_detail":       ou_detail,
             "correct_scores":  pa["correct_scores"],
             "asian_handicap":  pa["asian_handicap"],
+            "expected_goals":  ou_detail["recommended"]["expected_goals"],
         }
 
         results.append({
