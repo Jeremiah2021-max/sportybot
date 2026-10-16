@@ -1275,6 +1275,19 @@ body {
   line-height: 1.5;
 }
 
+/* Overall conclusion */
+.rec-conclusion {
+  background: linear-gradient(135deg, #24103d, #1a0b2e);
+  border: 2px solid var(--violet);
+  border-radius: var(--radius);
+  padding: 16px;
+  margin-top: 16px;
+  font-size: 0.9rem;
+  line-height: 1.6;
+  color: var(--text);
+  font-weight: 500;
+}
+
 /* Bankroll */
 .bankroll-display {
   text-align: center;

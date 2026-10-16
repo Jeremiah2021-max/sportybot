@@ -376,7 +376,10 @@ async function runOCR() {
       m => m.home && m.away && m.odd1 && m.oddX && m.odd2
     );
 
-    if (validMatches.length > 0) {
+    // Limit to first 3 matches for better accuracy
+    const matchesToAnalyze = validMatches.slice(0, 3);
+
+    if (matchesToAnalyze.length > 0) {
       // Keep skeletons visible while AI call is in flight
       setStatus("Running AI + Poisson prediction engine…", 60);
 
@@ -394,7 +397,7 @@ async function runOCR() {
           method:  "POST",
           headers: predHeaders,
           // Pass session_id so backend broadcast hits this tab's WS
-          body:    JSON.stringify(validMatches, null, 0),
+          body:    JSON.stringify(matchesToAnalyze, null, 0),
           signal:  controller2.signal,
         });
         clearTimeout(timeout2);
@@ -784,6 +787,25 @@ function renderAIPredictions(prediction) {
   disc.className = "rec-disclaimer";
   disc.innerHTML = `Instant Virtuals are RNG-based. AI + Poisson analysis is odds-value based only — not real match prediction. Gamble responsibly. 18+`;
   container.appendChild(disc);
+
+  // ── Overall conclusion/recommendation ─────────────────────────────
+  const conclusion = document.createElement("div");
+  conclusion.className = "rec-conclusion";
+
+  const topValueBet = predictions.find(p => p.value_bet);
+  const topConfidence = predictions.length > 0 ? predictions[0] : null;
+
+  let recommendation = "";
+  if (topValueBet) {
+    recommendation = `<strong>RECOMMENDATION:</strong> Bet on <strong>${escapeHtml(topValueBet.home)} vs ${escapeHtml(topValueBet.away)}</strong> - ${escapeHtml(topValueBet.best_pick.label)} @ ${topValueBet.best_pick.odd}. This is a value bet with +${topValueBet.best_pick.edge_pct.toFixed(1)}% edge and ${topValueBet.best_pick.confidence}% confidence.`;
+  } else if (topConfidence) {
+    recommendation = `<strong>RECOMMENDATION:</strong> Consider <strong>${escapeHtml(topConfidence.home)} vs ${escapeHtml(topConfidence.away)}</strong> - ${escapeHtml(topConfidence.best_pick.label)} @ ${topConfidence.best_pick.odd} (confidence: ${topConfidence.best_pick.confidence}%). No strong value detected - bet small or skip.`;
+  } else {
+    recommendation = `<strong>RECOMMENDATION:</strong> No strong betting opportunities found. Skip this round or bet very small amounts only.`;
+  }
+
+  conclusion.innerHTML = recommendation;
+  container.appendChild(conclusion);
 
   document.getElementById("recommendations").classList.remove("hidden");
   document.getElementById("recommendations").scrollIntoView({ behavior: "smooth" });
